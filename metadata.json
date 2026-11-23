@@ -1,0 +1,6 @@
+{
+  "name": "Gestão Inteligente de Coletores",
+  "description": "Sistema corporativo para controle de elegibilidade (regra de 120 dias), importação de planilhas, entregas e registro de exames de coletores.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

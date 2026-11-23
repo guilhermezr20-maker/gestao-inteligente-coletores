@@ -1,0 +1,623 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // 1. Global Safety Net (Default-Deny)
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // 2. Global Helpers
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerified() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isValidHash(h) {
+      return h is string && h.size() == 64 && h.matches('^[a-f0-9]{64}$');
+    }
+
+    function isBootstrappedAdmin() {
+      return isVerified() && request.auth.token.email == 'acoessmaranhao@gmail.com';
+    }
+
+    function isAdmin() {
+      return isBootstrappedAdmin() ||
+        (isVerified() && exists(/databases/$(database)/documents/admins/$(request.auth.uid)));
+    }
+
+    function userDocExists() {
+      return exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function userDoc() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function isStaffMember() {
+      return isBootstrappedAdmin() ||
+        (isVerified() && userDocExists() && userDoc().active == true);
+    }
+
+    function hasPerm(permKey) {
+      return isAdmin() || (
+        isStaffMember() &&
+        ('permissions' in userDoc()) &&
+        (
+          (permKey in userDoc().permissions && userDoc().permissions[permKey] == true) ||
+          (permKey == 'importarPlanilhas' && ('importarPlanilha' in userDoc().permissions) && userDoc().permissions.importarPlanilha == true) ||
+          (permKey == 'marcarEntregas' && ('entregarColetores' in userDoc().permissions) && userDoc().permissions.entregarColetores == true)
+        )
+      );
+    }
+
+    function canManageUsers() {
+      return isAdmin() || hasPerm('gerenciarUsuarios');
+    }
+
+    // 3. Entity Validation Helpers (Validation Blueprints)
+    function isValidPermissions(perms) {
+      return perms is map
+        && perms.keys().hasAll([
+          'importarPlanilhas', 'visualizarColaboradores', 'marcarEntregas',
+          'consultarHistorico', 'exportarRelatorios', 'gerenciarUsuarios'
+        ])
+        && perms.keys().hasOnly([
+          'importarPlanilhas', 'visualizarColaboradores', 'marcarEntregas',
+          'consultarHistorico', 'exportarRelatorios', 'gerenciarUsuarios'
+        ])
+        && perms.importarPlanilhas is bool
+        && perms.visualizarColaboradores is bool
+        && perms.marcarEntregas is bool
+        && perms.consultarHistorico is bool
+        && perms.exportarRelatorios is bool
+        && perms.gerenciarUsuarios is bool;
+    }
+
+    function isValidUserProfile(data, userId) {
+      return data.keys().hasAll(['uid', 'email', 'displayName', 'role', 'active', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['uid', 'email', 'displayName', 'role', 'active', 'permissions', 'createdByUid', 'createdAt', 'updatedAt'])
+        && isValidId(data.uid)
+        && data.uid == userId
+        && data.email is string && data.email.size() >= 3 && data.email.size() <= 200
+        && data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 160
+        && data.role in ['admin', 'operador']
+        && data.active is bool
+        && (!('permissions' in data) || isValidPermissions(data.permissions))
+        && (!('createdByUid' in data) || isValidId(data.createdByUid))
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidUserInvite(data, inviteId) {
+      return data.keys().hasAll(['id', 'email', 'displayName', 'role', 'active', 'permissions', 'createdByUid', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'email', 'displayName', 'role', 'active', 'permissions', 'createdByUid', 'createdAt', 'updatedAt'])
+        && isValidId(data.id)
+        && data.id == inviteId
+        && data.email is string && data.email.size() >= 3 && data.email.size() <= 200
+        && data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 160
+        && data.role in ['admin', 'operador']
+        && data.active is bool
+        && isValidPermissions(data.permissions)
+        && isValidId(data.createdByUid)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidAdminGrant(data, userId) {
+      return data.keys().hasAll(['uid', 'email', 'grantedByUid', 'createdAt'])
+        && data.keys().hasOnly(['uid', 'email', 'grantedByUid', 'createdAt'])
+        && isValidId(data.uid)
+        && data.uid == userId
+        && data.email is string && data.email.size() >= 3 && data.email.size() <= 200
+        && isValidId(data.grantedByUid)
+        && data.createdAt is timestamp;
+    }
+
+    function isValidEmpresa(data, empresaId) {
+      return data.keys().hasAll(['id', 'nome', 'ativa', 'createdByUid', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'nome', 'cnpj', 'ativa', 'createdByUid', 'createdAt', 'updatedAt'])
+        && isValidId(data.id)
+        && data.id == empresaId
+        && data.nome is string && data.nome.size() >= 2 && data.nome.size() <= 180
+        && (!('cnpj' in data) || (data.cnpj is string && data.cnpj.size() <= 24))
+        && data.ativa is bool
+        && isValidId(data.createdByUid)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidUnidade(data, unidadeId) {
+      return data.keys().hasAll(['id', 'empresaId', 'empresaNome', 'nome', 'ativa', 'createdByUid', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'empresaId', 'empresaNome', 'nome', 'codigo', 'cidade', 'estado', 'ativa', 'createdByUid', 'createdAt', 'updatedAt'])
+        && isValidId(data.id)
+        && data.id == unidadeId
+        && isValidId(data.empresaId)
+        && data.empresaNome is string && data.empresaNome.size() >= 2 && data.empresaNome.size() <= 180
+        && data.nome is string && data.nome.size() >= 2 && data.nome.size() <= 180
+        && (!('codigo' in data) || (data.codigo is string && data.codigo.size() <= 40))
+        && (!('cidade' in data) || (data.cidade is string && data.cidade.size() <= 120))
+        && (!('estado' in data) || (data.estado is string && data.estado.size() <= 40))
+        && data.ativa is bool
+        && isValidId(data.createdByUid)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidAcao(data, acaoId) {
+      return data.keys().hasAll(['id', 'empresaId', 'empresaNome', 'unidadeId', 'unidadeNome', 'nome', 'mesReferencia', 'anoReferencia', 'status', 'totalColaboradores', 'createdByUid', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'empresaId', 'empresaNome', 'unidadeId', 'unidadeNome', 'nome', 'mesReferencia', 'anoReferencia', 'status', 'totalColaboradores', 'createdByUid', 'createdAt', 'updatedAt'])
+        && isValidId(data.id)
+        && data.id == acaoId
+        && isValidId(data.empresaId)
+        && data.empresaNome is string && data.empresaNome.size() >= 2 && data.empresaNome.size() <= 180
+        && isValidId(data.unidadeId)
+        && data.unidadeNome is string && data.unidadeNome.size() >= 2 && data.unidadeNome.size() <= 180
+        && data.nome is string && data.nome.size() >= 2 && data.nome.size() <= 200
+        && data.mesReferencia is int && data.mesReferencia >= 1 && data.mesReferencia <= 12
+        && data.anoReferencia is int && data.anoReferencia >= 2020 && data.anoReferencia <= 2100
+        && data.status in ['aberta', 'concluida']
+        && data.totalColaboradores is int && data.totalColaboradores >= 0
+        && isValidId(data.createdByUid)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidColaborador(data, colaboradorId) {
+      return data.keys().hasAll(['id', 'cpfHash', 'cpfMascarado', 'nome', 'nomeNormalizado', 'centroCusto', 'funcao', 'totalColetoresRecebidos', 'createdByUid', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly([
+          'id', 'cpfHash', 'cpfMascarado', 'nome', 'nomeNormalizado', 'centroCusto', 'funcao',
+          'ultimaEmpresaId', 'ultimaEmpresaNome', 'ultimaUnidadeId', 'ultimaUnidadeNome',
+          'ultimaAcaoId', 'ultimaAcaoNome', 'ultimaEntregaId', 'ultimaEntregaData',
+          'ultimaEntregaDataHora', 'totalColetoresRecebidos', 'createdByUid', 'createdAt', 'updatedAt'
+        ])
+        && isValidHash(data.id)
+        && data.id == colaboradorId
+        && isValidHash(data.cpfHash)
+        && data.cpfHash == colaboradorId
+        && data.cpfMascarado is string && data.cpfMascarado.size() >= 8 && data.cpfMascarado.size() <= 20
+        && data.nome is string && data.nome.size() >= 2 && data.nome.size() <= 200
+        && data.nomeNormalizado is string && data.nomeNormalizado.size() >= 2 && data.nomeNormalizado.size() <= 200
+        && data.centroCusto is string && data.centroCusto.size() >= 1 && data.centroCusto.size() <= 140
+        && data.funcao is string && data.funcao.size() >= 1 && data.funcao.size() <= 140
+        && (!('ultimaEmpresaId' in data) || (data.ultimaEmpresaId is string && data.ultimaEmpresaId.size() <= 128))
+        && (!('ultimaEmpresaNome' in data) || (data.ultimaEmpresaNome is string && data.ultimaEmpresaNome.size() <= 180))
+        && (!('ultimaUnidadeId' in data) || (data.ultimaUnidadeId is string && data.ultimaUnidadeId.size() <= 128))
+        && (!('ultimaUnidadeNome' in data) || (data.ultimaUnidadeNome is string && data.ultimaUnidadeNome.size() <= 180))
+        && (!('ultimaAcaoId' in data) || (data.ultimaAcaoId is string && data.ultimaAcaoId.size() <= 128))
+        && (!('ultimaAcaoNome' in data) || (data.ultimaAcaoNome is string && data.ultimaAcaoNome.size() <= 200))
+        && (!('ultimaEntregaId' in data) || (data.ultimaEntregaId is string && data.ultimaEntregaId.size() <= 128))
+        && (!('ultimaEntregaData' in data) || (data.ultimaEntregaData is string && data.ultimaEntregaData.size() <= 20))
+        && (!('ultimaEntregaDataHora' in data) || (data.ultimaEntregaDataHora is string && data.ultimaEntregaDataHora.size() <= 32))
+        && data.totalColetoresRecebidos is int && data.totalColetoresRecebidos >= 0
+        && isValidId(data.createdByUid)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidColaboradorHistorico(data, historicoId) {
+      return data.keys().hasAll(['id', 'colaboradorHash', 'cpfMascarado', 'tipo', 'descricao', 'dataEvento', 'createdByUid', 'usuarioNome', 'createdAt'])
+        && data.keys().hasOnly([
+          'id', 'colaboradorHash', 'cpfMascarado', 'tipo', 'descricao',
+          'empresaNome', 'unidadeNome', 'acaoId', 'acaoNome', 'mesReferencia', 'anoReferencia',
+          'dataEvento', 'createdByUid', 'usuarioNome', 'createdAt'
+        ])
+        && isValidId(data.id)
+        && data.id == historicoId
+        && isValidHash(data.colaboradorHash)
+        && data.cpfMascarado is string && data.cpfMascarado.size() >= 8 && data.cpfMascarado.size() <= 20
+        && data.tipo in ['CADASTRO_INICIAL', 'ATUALIZACAO_CADASTRAL', 'PARTICIPACAO_ACAO', 'ENTREGA_COLETOR']
+        && data.descricao is string && data.descricao.size() >= 2 && data.descricao.size() <= 500
+        && (!('empresaNome' in data) || (data.empresaNome is string && data.empresaNome.size() <= 180))
+        && (!('unidadeNome' in data) || (data.unidadeNome is string && data.unidadeNome.size() <= 180))
+        && (!('acaoId' in data) || (data.acaoId is string && data.acaoId.size() <= 128))
+        && (!('acaoNome' in data) || (data.acaoNome is string && data.acaoNome.size() <= 200))
+        && (!('mesReferencia' in data) || (data.mesReferencia is int && data.mesReferencia >= 1 && data.mesReferencia <= 12))
+        && (!('anoReferencia' in data) || (data.anoReferencia is int && data.anoReferencia >= 2020 && data.anoReferencia <= 2100))
+        && data.dataEvento is string && data.dataEvento.size() >= 8 && data.dataEvento.size() <= 32
+        && isValidId(data.createdByUid)
+        && data.usuarioNome is string && data.usuarioNome.size() >= 1 && data.usuarioNome.size() <= 160
+        && data.createdAt is timestamp;
+    }
+
+    function isValidImportacao(data, importacaoId) {
+      return data.keys().hasAll(['id', 'fileHash', 'nomeArquivo', 'empresaId', 'empresaNome', 'unidadeId', 'unidadeNome', 'acaoId', 'acaoNome', 'mesReferencia', 'anoReferencia', 'totalLinhas', 'createdByUid', 'responsavelNome', 'responsavelEmail', 'createdAt'])
+        && data.keys().hasOnly([
+          'id', 'fileHash', 'nomeArquivo', 'empresaId', 'empresaNome', 'unidadeId', 'unidadeNome',
+          'acaoId', 'acaoNome', 'mesReferencia', 'anoReferencia', 'totalLinhas',
+          'novosColaboradores', 'atualizados', 'errosCount', 'duplicadosArquivo',
+          'jaReceberamCount', 'naoReceberamCount',
+          'createdByUid', 'responsavelNome', 'responsavelEmail', 'createdAt'
+        ])
+        && isValidId(data.id)
+        && data.id == importacaoId
+        && data.fileHash is string && data.fileHash.size() >= 8 && data.fileHash.size() <= 64
+        && data.nomeArquivo is string && data.nomeArquivo.size() >= 1 && data.nomeArquivo.size() <= 240
+        && isValidId(data.empresaId)
+        && data.empresaNome is string && data.empresaNome.size() <= 180
+        && isValidId(data.unidadeId)
+        && data.unidadeNome is string && data.unidadeNome.size() <= 180
+        && isValidId(data.acaoId)
+        && data.acaoNome is string && data.acaoNome.size() <= 200
+        && data.mesReferencia is int && data.mesReferencia >= 1 && data.mesReferencia <= 12
+        && data.anoReferencia is int && data.anoReferencia >= 2020 && data.anoReferencia <= 2100
+        && data.totalLinhas is int && data.totalLinhas >= 0
+        && (!('novosColaboradores' in data) || (data.novosColaboradores is int && data.novosColaboradores >= 0))
+        && (!('atualizados' in data) || (data.atualizados is int && data.atualizados >= 0))
+        && (!('errosCount' in data) || (data.errosCount is int && data.errosCount >= 0))
+        && (!('duplicadosArquivo' in data) || (data.duplicadosArquivo is int && data.duplicadosArquivo >= 0))
+        && (!('jaReceberamCount' in data) || (data.jaReceberamCount is int && data.jaReceberamCount >= 0))
+        && (!('naoReceberamCount' in data) || (data.naoReceberamCount is int && data.naoReceberamCount >= 0))
+        && isValidId(data.createdByUid)
+        && data.responsavelNome is string && data.responsavelNome.size() <= 160
+        && data.responsavelEmail is string && data.responsavelEmail.size() <= 200
+        && data.createdAt is timestamp;
+    }
+
+    function isValidImportacaoItem(data, itemId) {
+      return data.keys().hasAll(['id', 'importacaoId', 'acaoId', 'acaoNome', 'empresaId', 'empresaNome', 'unidadeId', 'unidadeNome', 'mesReferencia', 'anoReferencia', 'colaboradorHash', 'colaboradorNome', 'cpfMascarado', 'centroCusto', 'funcao', 'createdByUid', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'importacaoId', 'acaoId', 'acaoNome', 'empresaId', 'empresaNome', 'unidadeId', 'unidadeNome', 'mesReferencia', 'anoReferencia', 'colaboradorHash', 'colaboradorNome', 'cpfMascarado', 'centroCusto', 'funcao', 'createdByUid', 'createdAt', 'updatedAt'])
+        && isValidId(data.id)
+        && data.id == itemId
+        && isValidId(data.importacaoId)
+        && isValidId(data.acaoId)
+        && data.acaoNome is string && data.acaoNome.size() <= 200
+        && isValidId(data.empresaId)
+        && data.empresaNome is string && data.empresaNome.size() <= 180
+        && isValidId(data.unidadeId)
+        && data.unidadeNome is string && data.unidadeNome.size() <= 180
+        && data.mesReferencia is int && data.mesReferencia >= 1 && data.mesReferencia <= 12
+        && data.anoReferencia is int && data.anoReferencia >= 2020 && data.anoReferencia <= 2100
+        && isValidHash(data.colaboradorHash)
+        && data.colaboradorNome is string && data.colaboradorNome.size() <= 200
+        && data.cpfMascarado is string && data.cpfMascarado.size() <= 20
+        && data.centroCusto is string && data.centroCusto.size() >= 1 && data.centroCusto.size() <= 140
+        && data.funcao is string && data.funcao.size() >= 1 && data.funcao.size() <= 140
+        && isValidId(data.createdByUid)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidEntrega(data, entregaId) {
+      return data.keys().hasAll(['id', 'colaboradorHash', 'colaboradorNome', 'cpfMascarado', 'centroCusto', 'funcao', 'empresaId', 'empresaNome', 'unidadeId', 'unidadeNome', 'acaoId', 'acaoNome', 'dataEntrega', 'dataHoraEntrega', 'createdByUid', 'responsavelNome', 'responsavelEmail', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly([
+          'id', 'colaboradorHash', 'colaboradorNome', 'cpfMascarado', 'centroCusto', 'funcao',
+          'empresaId', 'empresaNome', 'unidadeId', 'unidadeNome', 'acaoId', 'acaoNome',
+          'dataEntrega', 'dataHoraEntrega', 'entregaAnteriorData',
+          'createdByUid', 'responsavelNome', 'responsavelEmail', 'createdAt', 'updatedAt'
+        ])
+        && isValidId(data.id)
+        && data.id == entregaId
+        && isValidHash(data.colaboradorHash)
+        && data.colaboradorNome is string && data.colaboradorNome.size() >= 2 && data.colaboradorNome.size() <= 200
+        && data.cpfMascarado is string && data.cpfMascarado.size() >= 8 && data.cpfMascarado.size() <= 20
+        && data.centroCusto is string && data.centroCusto.size() >= 1 && data.centroCusto.size() <= 140
+        && data.funcao is string && data.funcao.size() >= 1 && data.funcao.size() <= 140
+        && isValidId(data.empresaId)
+        && data.empresaNome is string && data.empresaNome.size() <= 180
+        && isValidId(data.unidadeId)
+        && data.unidadeNome is string && data.unidadeNome.size() <= 180
+        && isValidId(data.acaoId)
+        && data.acaoNome is string && data.acaoNome.size() <= 200
+        && data.dataEntrega is string && data.dataEntrega.size() == 10
+        && data.dataHoraEntrega is string && data.dataHoraEntrega.size() >= 10 && data.dataHoraEntrega.size() <= 32
+        && (!('entregaAnteriorData' in data) || (data.entregaAnteriorData is string && data.entregaAnteriorData.size() <= 32))
+        && isValidId(data.createdByUid)
+        && data.responsavelNome is string && data.responsavelNome.size() <= 160
+        && data.responsavelEmail is string && data.responsavelEmail.size() <= 200
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidConfig(data, configId) {
+      return data.keys().hasAll(['id', 'updatedByUid', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'custoUnitarioColetor', 'custoLogisticoPadrao', 'custoUnitarioEnvio', 'updatedByUid', 'updatedAt'])
+        && isValidId(data.id)
+        && data.id == configId
+        && (!('custoUnitarioColetor' in data) || (data.custoUnitarioColetor is number && data.custoUnitarioColetor >= 0))
+        && (!('custoLogisticoPadrao' in data) || (data.custoLogisticoPadrao is number && data.custoLogisticoPadrao >= 0))
+        && (!('custoUnitarioEnvio' in data) || (data.custoUnitarioEnvio is number && data.custoUnitarioEnvio >= 0))
+        && isValidId(data.updatedByUid)
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidAuditoria(data, auditId) {
+      return data.keys().hasAll(['id', 'tipo', 'entidade', 'entidadeId', 'descricao', 'createdByUid', 'usuarioNome', 'usuarioEmail', 'createdAt'])
+        && data.keys().hasOnly(['id', 'tipo', 'entidade', 'entidadeId', 'descricao', 'createdByUid', 'usuarioNome', 'usuarioEmail', 'createdAt'])
+        && isValidId(data.id)
+        && data.id == auditId
+        && data.tipo is string && data.tipo.size() >= 2 && data.tipo.size() <= 60
+        && data.entidade is string && data.entidade.size() >= 2 && data.entidade.size() <= 60
+        && data.entidadeId is string && data.entidadeId.size() >= 1 && data.entidadeId.size() <= 128
+        && data.descricao is string && data.descricao.size() >= 2 && data.descricao.size() <= 500
+        && isValidId(data.createdByUid)
+        && data.usuarioNome is string && data.usuarioNome.size() <= 160
+        && data.usuarioEmail is string && data.usuarioEmail.size() <= 200
+        && data.createdAt is timestamp;
+    }
+
+    // 4. Collection Match Blocks
+
+    match /test/connection {
+      allow get: if isSignedIn();
+    }
+
+    match /users/{userId} {
+      allow get: if isValidId(userId) && (isOwner(userId) || canManageUsers());
+      allow list: if isBootstrappedAdmin() || (isVerified() && resource.data.createdByUid == request.auth.uid);
+      allow create: if isValidId(userId)
+        && isVerified()
+        && isValidUserProfile(incoming(), userId)
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && (
+          canManageUsers() ||
+          (isOwner(userId) && incoming().role == 'operador' && incoming().active == true)
+        );
+      allow update: if isValidId(userId)
+        && isVerified()
+        && isValidUserProfile(incoming(), userId)
+        && incoming().uid == existing().uid
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          canManageUsers() ||
+          (isOwner(userId) && incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'updatedAt']))
+        );
+      allow delete: if isValidId(userId) && isAdmin();
+    }
+
+    match /user_invites/{inviteId} {
+      allow get: if isValidId(inviteId) && (canManageUsers() || (isVerified() && (resource == null || existing().email == request.auth.token.email)));
+      allow list: if isBootstrappedAdmin() || (isVerified() && resource.data.createdByUid == request.auth.uid);
+      allow create: if isValidId(inviteId)
+        && canManageUsers()
+        && isValidUserInvite(incoming(), inviteId)
+        && incoming().createdByUid == request.auth.uid
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isValidId(inviteId)
+        && canManageUsers()
+        && isValidUserInvite(incoming(), inviteId)
+        && incoming().id == existing().id
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time;
+      allow delete: if isValidId(inviteId) && canManageUsers();
+    }
+
+    match /admins/{userId} {
+      allow get: if isValidId(userId) && (isOwner(userId) || isAdmin());
+      allow list: if isBootstrappedAdmin();
+      allow create: if isValidId(userId)
+        && isAdmin()
+        && isValidAdminGrant(incoming(), userId)
+        && incoming().grantedByUid == request.auth.uid
+        && incoming().createdAt == request.time;
+      allow update: if false;
+      allow delete: if isValidId(userId) && isAdmin();
+    }
+
+    match /empresas/{empresaId} {
+      allow get: if isValidId(empresaId) && isStaffMember();
+      allow list: if isBootstrappedAdmin() || (isVerified() && resource.data.createdByUid == request.auth.uid);
+      allow create: if isValidId(empresaId)
+        && hasPerm('importarPlanilhas')
+        && isValidEmpresa(incoming(), empresaId)
+        && incoming().createdByUid == request.auth.uid
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isValidId(empresaId)
+        && hasPerm('importarPlanilhas')
+        && isValidEmpresa(incoming(), empresaId)
+        && incoming().id == existing().id
+        && incoming().createdByUid == existing().createdByUid
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (isAdmin() || incoming().diff(existing()).affectedKeys().hasOnly(['nome', 'cnpj', 'ativa', 'updatedAt']));
+      allow delete: if isValidId(empresaId) && isBootstrappedAdmin();
+    }
+
+    match /unidades/{unidadeId} {
+      allow get: if isValidId(unidadeId) && isStaffMember();
+      allow list: if isBootstrappedAdmin() || (isVerified() && resource.data.createdByUid == request.auth.uid);
+      allow create: if isValidId(unidadeId)
+        && hasPerm('importarPlanilhas')
+        && isValidUnidade(incoming(), unidadeId)
+        && incoming().createdByUid == request.auth.uid
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && exists(/databases/$(database)/documents/empresas/$(incoming().empresaId));
+      allow update: if isValidId(unidadeId)
+        && hasPerm('importarPlanilhas')
+        && isValidUnidade(incoming(), unidadeId)
+        && incoming().id == existing().id
+        && incoming().createdByUid == existing().createdByUid
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (isAdmin() || incoming().diff(existing()).affectedKeys().hasOnly(['nome', 'codigo', 'cidade', 'estado', 'ativa', 'updatedAt']));
+      allow delete: if isValidId(unidadeId) && isBootstrappedAdmin();
+    }
+
+    match /acoes/{acaoId} {
+      allow get: if isValidId(acaoId) && isStaffMember();
+      allow list: if isBootstrappedAdmin() || (isVerified() && resource.data.createdByUid == request.auth.uid);
+      allow create: if isValidId(acaoId)
+        && hasPerm('importarPlanilhas')
+        && isValidAcao(incoming(), acaoId)
+        && incoming().createdByUid == request.auth.uid
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && exists(/databases/$(database)/documents/empresas/$(incoming().empresaId))
+        && exists(/databases/$(database)/documents/unidades/$(incoming().unidadeId));
+      allow update: if isValidId(acaoId)
+        && (hasPerm('importarPlanilhas') || hasPerm('marcarEntregas'))
+        && isValidAcao(incoming(), acaoId)
+        && incoming().id == existing().id
+        && incoming().createdByUid == existing().createdByUid
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          isAdmin() ||
+          (existing().status == 'aberta' && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'totalColaboradores', 'updatedAt']))
+        );
+      allow delete: if isValidId(acaoId) && isBootstrappedAdmin();
+    }
+
+    match /colaboradores/{colaboradorId} {
+      allow get: if isValidHash(colaboradorId) && isStaffMember();
+      allow list: if isBootstrappedAdmin() || (isVerified() && resource.data.createdByUid == request.auth.uid);
+      allow create: if isValidHash(colaboradorId)
+        && (hasPerm('importarPlanilhas') || hasPerm('marcarEntregas'))
+        && isValidColaborador(incoming(), colaboradorId)
+        && incoming().createdByUid == request.auth.uid
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isValidHash(colaboradorId)
+        && isStaffMember()
+        && isValidColaborador(incoming(), colaboradorId)
+        && incoming().id == existing().id
+        && incoming().cpfHash == existing().cpfHash
+        && incoming().createdByUid == existing().createdByUid
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          isAdmin() ||
+          (hasPerm('importarPlanilhas') && incoming().diff(existing()).affectedKeys().hasOnly([
+            'nome', 'nomeNormalizado', 'centroCusto', 'funcao',
+            'ultimaEmpresaId', 'ultimaEmpresaNome', 'ultimaUnidadeId', 'ultimaUnidadeNome',
+            'ultimaAcaoId', 'ultimaAcaoNome', 'updatedAt'
+          ])) ||
+          (hasPerm('marcarEntregas') && incoming().diff(existing()).affectedKeys().hasOnly([
+            'ultimaEmpresaId', 'ultimaEmpresaNome', 'ultimaUnidadeId', 'ultimaUnidadeNome',
+            'ultimaAcaoId', 'ultimaAcaoNome', 'ultimaEntregaId', 'ultimaEntregaData',
+            'ultimaEntregaDataHora', 'totalColetoresRecebidos', 'updatedAt'
+          ]))
+        );
+      allow delete: if isValidHash(colaboradorId) && isBootstrappedAdmin();
+    }
+
+    match /colaboradores_historico/{historicoId} {
+      allow get: if isValidId(historicoId) && isStaffMember();
+      allow list: if isBootstrappedAdmin() || (isVerified() && resource.data.createdByUid == request.auth.uid);
+      allow create: if isValidId(historicoId)
+        && isStaffMember()
+        && isValidColaboradorHistorico(incoming(), historicoId)
+        && incoming().createdByUid == request.auth.uid
+        && incoming().createdAt == request.time
+        && existsAfter(/databases/$(database)/documents/colaboradores/$(incoming().colaboradorHash));
+      allow update: if false;
+      allow delete: if isValidId(historicoId) && isBootstrappedAdmin();
+    }
+
+    match /importacoes/{importacaoId} {
+      allow get: if isValidId(importacaoId) && isStaffMember();
+      allow list: if isBootstrappedAdmin() || (isVerified() && resource.data.createdByUid == request.auth.uid);
+      allow create: if isValidId(importacaoId)
+        && hasPerm('importarPlanilhas')
+        && isValidImportacao(incoming(), importacaoId)
+        && incoming().createdByUid == request.auth.uid
+        && incoming().createdAt == request.time
+        && exists(/databases/$(database)/documents/acoes/$(incoming().acaoId));
+      allow update: if false;
+      allow delete: if isValidId(importacaoId) && isBootstrappedAdmin();
+    }
+
+    match /importacao_itens/{itemId} {
+      allow get: if isValidId(itemId) && isStaffMember();
+      allow list: if isBootstrappedAdmin() || (isVerified() && resource.data.createdByUid == request.auth.uid);
+      allow create: if isValidId(itemId)
+        && hasPerm('importarPlanilhas')
+        && isValidImportacaoItem(incoming(), itemId)
+        && incoming().createdByUid == request.auth.uid
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && exists(/databases/$(database)/documents/acoes/$(incoming().acaoId));
+      allow update: if isValidId(itemId)
+        && hasPerm('importarPlanilhas')
+        && isValidImportacaoItem(incoming(), itemId)
+        && incoming().id == existing().id
+        && incoming().acaoId == existing().acaoId
+        && incoming().colaboradorHash == existing().colaboradorHash
+        && incoming().createdByUid == existing().createdByUid
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (isAdmin() || incoming().diff(existing()).affectedKeys().hasOnly(['importacaoId', 'colaboradorNome', 'centroCusto', 'funcao', 'updatedAt']));
+      allow delete: if isValidId(itemId) && isBootstrappedAdmin();
+    }
+
+    match /entregas/{entregaId} {
+      allow get: if isValidId(entregaId) && isStaffMember();
+      allow list: if isBootstrappedAdmin() || (isVerified() && resource.data.createdByUid == request.auth.uid);
+      allow create: if isValidId(entregaId)
+        && hasPerm('marcarEntregas')
+        && isValidEntrega(incoming(), entregaId)
+        && incoming().createdByUid == request.auth.uid
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && exists(/databases/$(database)/documents/colaboradores/$(incoming().colaboradorHash))
+        && exists(/databases/$(database)/documents/acoes/$(incoming().acaoId))
+        && getAfter(/databases/$(database)/documents/colaboradores/$(incoming().colaboradorHash)).data.ultimaEntregaId == entregaId;
+      allow update: if false;
+      allow delete: if isValidId(entregaId) && isBootstrappedAdmin();
+    }
+
+    // Coleções legadas preservadas somente para leitura/exclusão durante reinicialização segura pelo admin principal
+    match /remessas/{remessaId} {
+      allow get, list, delete: if isBootstrappedAdmin();
+      allow create, update: if false;
+    }
+
+    match /exames/{exameId} {
+      allow get, list, delete: if isBootstrappedAdmin();
+      allow create, update: if false;
+    }
+
+    match /configuracoes/{configId} {
+      allow get: if isValidId(configId) && isStaffMember();
+      allow list: if isBootstrappedAdmin();
+      allow create: if isValidId(configId)
+        && isAdmin()
+        && isValidConfig(incoming(), configId)
+        && incoming().updatedByUid == request.auth.uid
+        && incoming().updatedAt == request.time;
+      allow update: if isValidId(configId)
+        && isAdmin()
+        && isValidConfig(incoming(), configId)
+        && incoming().id == existing().id
+        && incoming().updatedByUid == request.auth.uid
+        && incoming().updatedAt == request.time;
+      allow delete: if false;
+    }
+
+    match /auditoria/{auditId} {
+      allow get: if isValidId(auditId) && isStaffMember();
+      allow list: if isBootstrappedAdmin() || (isVerified() && resource.data.createdByUid == request.auth.uid);
+      allow create: if isValidId(auditId)
+        && isStaffMember()
+        && isValidAuditoria(incoming(), auditId)
+        && incoming().createdByUid == request.auth.uid
+        && incoming().createdAt == request.time;
+      allow update: if false;
+      allow delete: if isValidId(auditId) && isBootstrappedAdmin();
+    }
+  }
+}

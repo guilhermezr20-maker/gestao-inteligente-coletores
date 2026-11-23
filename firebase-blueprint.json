@@ -1,0 +1,322 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Perfil de usuário autenticado e suas 6 permissões granulares no sistema.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "email": { "type": "string", "maxLength": 200 },
+        "displayName": { "type": "string", "maxLength": 160 },
+        "role": { "type": "string", "enum": ["admin", "operador"] },
+        "active": { "type": "boolean" },
+        "permissions": { "type": "object" },
+        "createdByUid": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "displayName", "role", "active", "createdAt", "updatedAt"]
+    },
+    "UserInvite": {
+      "title": "UserInvite",
+      "description": "Pré-cadastro/convite de permissões por e-mail sem armazenamento de senha.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "email": { "type": "string", "maxLength": 200 },
+        "displayName": { "type": "string", "maxLength": 160 },
+        "role": { "type": "string", "enum": ["admin", "operador"] },
+        "active": { "type": "boolean" },
+        "permissions": { "type": "object" },
+        "createdByUid": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "email", "displayName", "role", "active", "permissions", "createdByUid", "createdAt", "updatedAt"]
+    },
+    "AdminGrant": {
+      "title": "AdminGrant",
+      "description": "Registro explícito de concessão de privilégio administrativo.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "email": { "type": "string", "maxLength": 200 },
+        "grantedByUid": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "grantedByUid", "createdAt"]
+    },
+    "Empresa": {
+      "title": "Empresa",
+      "description": "Empresa cliente atendida nas ações de entrega de coletores.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "nome": { "type": "string", "maxLength": 180 },
+        "cnpj": { "type": "string", "maxLength": 24 },
+        "ativa": { "type": "boolean" },
+        "createdByUid": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "nome", "ativa", "createdByUid", "createdAt", "updatedAt"]
+    },
+    "Unidade": {
+      "title": "Unidade",
+      "description": "Unidade operacional vinculada a uma empresa cliente.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "empresaId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "empresaNome": { "type": "string", "maxLength": 180 },
+        "nome": { "type": "string", "maxLength": 180 },
+        "codigo": { "type": "string", "maxLength": 40 },
+        "cidade": { "type": "string", "maxLength": 120 },
+        "estado": { "type": "string", "maxLength": 40 },
+        "ativa": { "type": "boolean" },
+        "createdByUid": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "empresaId", "empresaNome", "nome", "ativa", "createdByUid", "createdAt", "updatedAt"]
+    },
+    "Acao": {
+      "title": "Acao",
+      "description": "Ação ou campanha mensal vinculada à entrega de coletores.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "empresaId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "empresaNome": { "type": "string", "maxLength": 180 },
+        "unidadeId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "unidadeNome": { "type": "string", "maxLength": 180 },
+        "nome": { "type": "string", "maxLength": 200 },
+        "mesReferencia": { "type": "integer" },
+        "anoReferencia": { "type": "integer" },
+        "status": { "type": "string", "enum": ["aberta", "concluida"] },
+        "totalColaboradores": { "type": "integer" },
+        "createdByUid": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "empresaId", "empresaNome", "unidadeId", "unidadeNome", "nome", "mesReferencia", "anoReferencia", "status", "totalColaboradores", "createdByUid", "createdAt", "updatedAt"]
+    },
+    "Colaborador": {
+      "title": "Colaborador",
+      "description": "Cadastro único e permanente do colaborador indexado por hash do CPF.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-f0-9]{64}$" },
+        "cpfHash": { "type": "string", "maxLength": 64, "pattern": "^[a-f0-9]{64}$" },
+        "cpfMascarado": { "type": "string", "maxLength": 20 },
+        "nome": { "type": "string", "maxLength": 200 },
+        "nomeNormalizado": { "type": "string", "maxLength": 200 },
+        "centroCusto": { "type": "string", "maxLength": 140 },
+        "funcao": { "type": "string", "maxLength": 140 },
+        "ultimaEmpresaId": { "type": "string", "maxLength": 128 },
+        "ultimaEmpresaNome": { "type": "string", "maxLength": 180 },
+        "ultimaUnidadeId": { "type": "string", "maxLength": 128 },
+        "ultimaUnidadeNome": { "type": "string", "maxLength": 180 },
+        "ultimaAcaoId": { "type": "string", "maxLength": 128 },
+        "ultimaAcaoNome": { "type": "string", "maxLength": 200 },
+        "ultimaEntregaId": { "type": "string", "maxLength": 128 },
+        "ultimaEntregaData": { "type": "string", "maxLength": 20 },
+        "ultimaEntregaDataHora": { "type": "string", "maxLength": 32 },
+        "totalColetoresRecebidos": { "type": "integer" },
+        "createdByUid": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "cpfHash", "cpfMascarado", "nome", "nomeNormalizado", "centroCusto", "funcao", "totalColetoresRecebidos", "createdByUid", "createdAt", "updatedAt"]
+    },
+    "ColaboradorHistorico": {
+      "title": "ColaboradorHistorico",
+      "description": "Histórico permanente de movimentações cadastrais e entregas de coletores.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "colaboradorHash": { "type": "string", "maxLength": 64, "pattern": "^[a-f0-9]{64}$" },
+        "cpfMascarado": { "type": "string", "maxLength": 20 },
+        "tipo": { "type": "string", "enum": ["CADASTRO_INICIAL", "ATUALIZACAO_CADASTRAL", "PARTICIPACAO_ACAO", "ENTREGA_COLETOR"] },
+        "descricao": { "type": "string", "maxLength": 500 },
+        "empresaNome": { "type": "string", "maxLength": 180 },
+        "unidadeNome": { "type": "string", "maxLength": 180 },
+        "acaoId": { "type": "string", "maxLength": 128 },
+        "acaoNome": { "type": "string", "maxLength": 200 },
+        "mesReferencia": { "type": "integer" },
+        "anoReferencia": { "type": "integer" },
+        "dataEvento": { "type": "string", "maxLength": 20 },
+        "createdByUid": { "type": "string", "maxLength": 128 },
+        "usuarioNome": { "type": "string", "maxLength": 160 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "colaboradorHash", "cpfMascarado", "tipo", "descricao", "dataEvento", "createdByUid", "usuarioNome", "createdAt"]
+    },
+    "Importacao": {
+      "title": "Importacao",
+      "description": "Registro de importação de planilha Excel (.xlsx).",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "fileHash": { "type": "string", "maxLength": 64 },
+        "nomeArquivo": { "type": "string", "maxLength": 240 },
+        "empresaId": { "type": "string", "maxLength": 128 },
+        "empresaNome": { "type": "string", "maxLength": 180 },
+        "unidadeId": { "type": "string", "maxLength": 128 },
+        "unidadeNome": { "type": "string", "maxLength": 180 },
+        "acaoId": { "type": "string", "maxLength": 128 },
+        "acaoNome": { "type": "string", "maxLength": 200 },
+        "mesReferencia": { "type": "integer" },
+        "anoReferencia": { "type": "integer" },
+        "totalLinhas": { "type": "integer" },
+        "novosColaboradores": { "type": "integer" },
+        "atualizados": { "type": "integer" },
+        "errosCount": { "type": "integer" },
+        "duplicadosArquivo": { "type": "integer" },
+        "jaReceberamCount": { "type": "integer" },
+        "naoReceberamCount": { "type": "integer" },
+        "createdByUid": { "type": "string", "maxLength": 128 },
+        "responsavelNome": { "type": "string", "maxLength": 160 },
+        "responsavelEmail": { "type": "string", "maxLength": 200 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "fileHash", "nomeArquivo", "empresaId", "empresaNome", "unidadeId", "unidadeNome", "acaoId", "acaoNome", "mesReferencia", "anoReferencia", "totalLinhas", "createdByUid", "responsavelNome", "responsavelEmail", "createdAt"]
+    },
+    "ImportacaoItem": {
+      "title": "ImportacaoItem",
+      "description": "Vínculo único por ação e colaborador para controle de coletores.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "importacaoId": { "type": "string", "maxLength": 128 },
+        "acaoId": { "type": "string", "maxLength": 128 },
+        "acaoNome": { "type": "string", "maxLength": 200 },
+        "empresaId": { "type": "string", "maxLength": 128 },
+        "empresaNome": { "type": "string", "maxLength": 180 },
+        "unidadeId": { "type": "string", "maxLength": 128 },
+        "unidadeNome": { "type": "string", "maxLength": 180 },
+        "mesReferencia": { "type": "integer" },
+        "anoReferencia": { "type": "integer" },
+        "colaboradorHash": { "type": "string", "maxLength": 64 },
+        "colaboradorNome": { "type": "string", "maxLength": 200 },
+        "cpfMascarado": { "type": "string", "maxLength": 20 },
+        "centroCusto": { "type": "string", "maxLength": 140 },
+        "funcao": { "type": "string", "maxLength": 140 },
+        "createdByUid": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "importacaoId", "acaoId", "acaoNome", "empresaId", "empresaNome", "unidadeId", "unidadeNome", "mesReferencia", "anoReferencia", "colaboradorHash", "colaboradorNome", "cpfMascarado", "centroCusto", "funcao", "createdByUid", "createdAt", "updatedAt"]
+    },
+    "Entrega": {
+      "title": "Entrega",
+      "description": "Registro permanente de entrega de coletor (data, horário, empresa, unidade, ação e responsável).",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "colaboradorHash": { "type": "string", "maxLength": 64, "pattern": "^[a-f0-9]{64}$" },
+        "colaboradorNome": { "type": "string", "maxLength": 200 },
+        "cpfMascarado": { "type": "string", "maxLength": 20 },
+        "centroCusto": { "type": "string", "maxLength": 140 },
+        "funcao": { "type": "string", "maxLength": 140 },
+        "empresaId": { "type": "string", "maxLength": 128 },
+        "empresaNome": { "type": "string", "maxLength": 180 },
+        "unidadeId": { "type": "string", "maxLength": 128 },
+        "unidadeNome": { "type": "string", "maxLength": 180 },
+        "acaoId": { "type": "string", "maxLength": 128 },
+        "acaoNome": { "type": "string", "maxLength": 200 },
+        "dataEntrega": { "type": "string", "maxLength": 20 },
+        "dataHoraEntrega": { "type": "string", "maxLength": 32 },
+        "entregaAnteriorData": { "type": "string", "maxLength": 32 },
+        "createdByUid": { "type": "string", "maxLength": 128 },
+        "responsavelNome": { "type": "string", "maxLength": 160 },
+        "responsavelEmail": { "type": "string", "maxLength": 200 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "colaboradorHash", "colaboradorNome", "cpfMascarado", "centroCusto", "funcao", "empresaId", "empresaNome", "unidadeId", "unidadeNome", "acaoId", "acaoNome", "dataEntrega", "dataHoraEntrega", "createdByUid", "responsavelNome", "responsavelEmail", "createdAt", "updatedAt"]
+    },
+    "Configuracao": {
+      "title": "Configuracao",
+      "description": "Configuração institucional preservada durante reinicializações.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 64 },
+        "updatedByUid": { "type": "string", "maxLength": 128 },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "updatedByUid", "updatedAt"]
+    },
+    "Auditoria": {
+      "title": "Auditoria",
+      "description": "Logs de auditoria das operações realizadas no sistema.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "tipo": { "type": "string", "maxLength": 60 },
+        "entidade": { "type": "string", "maxLength": 60 },
+        "entidadeId": { "type": "string", "maxLength": 128 },
+        "descricao": { "type": "string", "maxLength": 500 },
+        "createdByUid": { "type": "string", "maxLength": 128 },
+        "usuarioNome": { "type": "string", "maxLength": 160 },
+        "usuarioEmail": { "type": "string", "maxLength": 200 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "tipo", "entidade", "entidadeId", "descricao", "createdByUid", "usuarioNome", "usuarioEmail", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "Perfis e permissões granulares dos usuários do sistema."
+    },
+    "/user_invites/{inviteId}": {
+      "schema": { "$ref": "#/entities/UserInvite" },
+      "description": "Convites e permissões pré-definidas por e-mail."
+    },
+    "/admins/{userId}": {
+      "schema": { "$ref": "#/entities/AdminGrant" },
+      "description": "Lista explícita de administradores autorizados."
+    },
+    "/empresas/{empresaId}": {
+      "schema": { "$ref": "#/entities/Empresa" },
+      "description": "Cadastro de empresas clientes."
+    },
+    "/unidades/{unidadeId}": {
+      "schema": { "$ref": "#/entities/Unidade" },
+      "description": "Cadastro de unidades vinculadas às empresas."
+    },
+    "/acoes/{acaoId}": {
+      "schema": { "$ref": "#/entities/Acao" },
+      "description": "Ações e campanhas mensais de coleta."
+    },
+    "/colaboradores/{colaboradorId}": {
+      "schema": { "$ref": "#/entities/Colaborador" },
+      "description": "Cadastro global permanente de colaboradores indexado por hash do CPF."
+    },
+    "/colaboradores_historico/{historicoId}": {
+      "schema": { "$ref": "#/entities/ColaboradorHistorico" },
+      "description": "Histórico imutável de movimentações cadastrais e entregas por colaborador."
+    },
+    "/importacoes/{importacaoId}": {
+      "schema": { "$ref": "#/entities/Importacao" },
+      "description": "Registro das planilhas importadas."
+    },
+    "/importacao_itens/{itemId}": {
+      "schema": { "$ref": "#/entities/ImportacaoItem" },
+      "description": "Itens consolidados por ação e colaborador."
+    },
+    "/entregas/{entregaId}": {
+      "schema": { "$ref": "#/entities/Entrega" },
+      "description": "Registros individuais de entrega de coletores."
+    },
+    "/configuracoes/{configId}": {
+      "schema": { "$ref": "#/entities/Configuracao" },
+      "description": "Parâmetros de sistema preservados."
+    },
+    "/auditoria/{auditId}": {
+      "schema": { "$ref": "#/entities/Auditoria" },
+      "description": "Logs de auditoria das operações."
+    }
+  }
+}
