@@ -1,13 +1,26 @@
 import { useEffect, useState } from 'react';
 import type { User } from 'firebase/auth';
-import { Calendar, History, PackageCheck, UserRound, X } from 'lucide-react';
+import {
+  AlertTriangle,
+  Calendar,
+  History,
+  PackageCheck,
+  RotateCcw,
+  Trash2,
+  UserRound,
+  X,
+} from 'lucide-react';
 import {
   evaluateRecebimentoStatus,
   formatDateBR,
   formatDateTimeBR,
   getCentroCusto,
 } from '../lib/coletorStatus';
-import { fetchColaboradorTimeline } from '../lib/firestoreService';
+import {
+  excluirColaboradorCompleto,
+  fetchColaboradorTimeline,
+  marcarDevolucaoColetor,
+} from '../lib/firestoreService';
 import type { Colaborador, ColaboradorHistorico, Entrega } from '../types/domain';
 import { StatusBadge } from './StatusBadge';
 
@@ -17,6 +30,9 @@ interface ColaboradorFichaModalProps {
   onClose: () => void;
   onMarcarRecebido?: (colaborador: Colaborador) => void;
   canMarkDelivery?: boolean;
+  canDeleteCadastro?: boolean;
+  onRefresh?: () => Promise<void>;
+  onDeleted?: () => void;
 }
 
 export function ColaboradorFichaModal({
@@ -25,15 +41,23 @@ export function ColaboradorFichaModal({
   onClose,
   onMarcarRecebido,
   canMarkDelivery = false,
+  canDeleteCadastro = false,
+  onRefresh,
+  onDeleted,
 }: ColaboradorFichaModalProps) {
   const [loading, setLoading] = useState(false);
   const [entregas, setEntregas] = useState<Entrega[]>([]);
   const [historico, setHistorico] = useState<ColaboradorHistorico[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!colaborador) return;
     let cancelled = false;
     setLoading(true);
+    setConfirmDelete(false);
+    setActionError(null);
     fetchColaboradorTimeline(user, colaborador.cpfHash)
       .then((res) => {
         if (!cancelled) {
@@ -56,6 +80,39 @@ export function ColaboradorFichaModal({
   const ultimaDataDisplay = entregas[0]
     ? formatDateTimeBR(entregas[0].dataHoraEntrega, entregas[0].dataEntrega)
     : formatDateTimeBR(colaborador.ultimaEntregaDataHora, colaborador.ultimaEntregaData);
+
+  const handleReturn = async () => {
+    if (!canMarkDelivery || !statusInfo.jaRecebeu) return;
+    setBusy(true);
+    setActionError(null);
+    try {
+      await marcarDevolucaoColetor(user, { colaboradorHash: colaborador.cpfHash });
+      const res = await fetchColaboradorTimeline(user, colaborador.cpfHash);
+      setEntregas(res.entregas);
+      setHistorico(res.historico);
+      if (onRefresh) await onRefresh();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Erro ao registrar devolução.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!canDeleteCadastro) return;
+    setBusy(true);
+    setActionError(null);
+    try {
+      await excluirColaboradorCompleto(user, colaborador);
+      if (onRefresh) await onRefresh();
+      if (onDeleted) onDeleted();
+      else onClose();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Erro ao excluir colaborador.');
+    } finally {
+      setBusy(false);
+    }
+  };
 
   return (
     <div
@@ -100,12 +157,59 @@ export function ColaboradorFichaModal({
 
         {/* Resumo Objetivo */}
         <div className="p-6 space-y-6 max-h-[75vh] overflow-y-auto">
+          {actionError && (
+            <div className="p-3 rounded-lg bg-rose-50 border border-rose-200 text-xs text-rose-800 flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+              <span>{actionError}</span>
+            </div>
+          )}
+
+          {confirmDelete && (
+            <div className="p-4 rounded-xl bg-rose-50 border border-rose-200 space-y-3">
+              <div className="flex items-start gap-2.5">
+                <Trash2 className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                <div className="text-xs text-rose-900">
+                  <strong>Confirmar exclusão completa deste CPF?</strong> Todo o cadastro, entregas, histórico e vínculos em ações serão excluídos permanentemente.
+                </div>
+              </div>
+              <div className="flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => setConfirmDelete(false)}
+                  className="px-3 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 rounded-lg"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={handleDelete}
+                  className="px-3 py-1.5 text-xs font-semibold text-white bg-rose-600 hover:bg-rose-700 rounded-lg disabled:opacity-50"
+                >
+                  {busy ? 'Excluindo...' : 'Excluir tudo do CPF'}
+                </button>
+              </div>
+            </div>
+          )}
+
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div className="p-4 rounded-lg bg-slate-50 border border-slate-200">
               <div className="text-xs font-medium text-slate-500">Situação Atual</div>
               <div className="mt-1.5">
                 <StatusBadge status={statusInfo.status} />
               </div>
+              {statusInfo.totalDevolucoes > 0 && (
+                <div className="text-[11px] text-cyan-800 font-mono-tabular mt-1.5">
+                  Devoluções: {statusInfo.totalDevolucoes}
+                  {statusInfo.ultimaDevolucaoData
+                    ? ` (última ${formatDateTimeBR(
+                        statusInfo.ultimaDevolucaoDataHora,
+                        statusInfo.ultimaDevolucaoData
+                      )})`
+                    : ''}
+                </div>
+              )}
             </div>
             <div className="p-4 rounded-lg bg-slate-50 border border-slate-200">
               <div className="text-xs font-medium text-slate-500">Registros de Entrega</div>
@@ -123,20 +227,44 @@ export function ColaboradorFichaModal({
 
           {/* Histórico das ações em que recebeu coletor */}
           <div className="space-y-3">
-            <div className="flex items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <h3 className="text-sm font-semibold text-slate-900 flex items-center gap-2">
                 <PackageCheck className="w-4 h-4 text-teal-600" />
                 Histórico de Entregas de Coletor ({entregas.length})
               </h3>
-              {canMarkDelivery && onMarcarRecebido && (
-                <button
-                  type="button"
-                  onClick={() => onMarcarRecebido(colaborador)}
-                  className="px-3.5 py-1.5 text-xs font-semibold text-white bg-teal-700 hover:bg-teal-800 rounded-lg transition-colors whitespace-nowrap"
-                >
-                  MARCAR COMO RECEBIDO
-                </button>
-              )}
+              <div className="flex items-center gap-2">
+                {canMarkDelivery && statusInfo.jaRecebeu && (
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={handleReturn}
+                    className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-semibold text-cyan-800 bg-cyan-50 border border-cyan-200 hover:bg-cyan-100 rounded-lg transition-colors whitespace-nowrap disabled:opacity-50"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    {busy ? 'Registrando...' : 'Marcar devolução'}
+                  </button>
+                )}
+                {canMarkDelivery && onMarcarRecebido && (
+                  <button
+                    type="button"
+                    onClick={() => onMarcarRecebido(colaborador)}
+                    className="px-3.5 py-1.5 text-xs font-semibold text-white bg-teal-700 hover:bg-teal-800 rounded-lg transition-colors whitespace-nowrap"
+                  >
+                    MARCAR COMO RECEBIDO
+                  </button>
+                )}
+                {canDeleteCadastro && !confirmDelete && (
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => setConfirmDelete(true)}
+                    className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-rose-700 bg-white border border-rose-200 hover:bg-rose-50 rounded-lg transition-colors whitespace-nowrap disabled:opacity-50"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    Excluir cadastro
+                  </button>
+                )}
+              </div>
             </div>
 
             {loading ? (
@@ -186,7 +314,12 @@ export function ColaboradorFichaModal({
               </h3>
               <div className="divide-y divide-slate-100 border border-slate-200 rounded-lg overflow-hidden">
                 {historico.map((h) => (
-                  <div key={h.id} className="px-3.5 py-2.5 text-xs flex items-start justify-between gap-3">
+                  <div
+                    key={h.id}
+                    className={`px-3.5 py-2.5 text-xs flex items-start justify-between gap-3 ${
+                      h.tipo === 'DEVOLUCAO_COLETOR' ? 'bg-cyan-50/40' : ''
+                    }`}
+                  >
                     <div>
                       <div className="text-slate-800">{h.descricao}</div>
                       <div className="text-[11px] text-slate-500 mt-0.5">
@@ -207,3 +340,4 @@ export function ColaboradorFichaModal({
     </div>
   );
 }
+

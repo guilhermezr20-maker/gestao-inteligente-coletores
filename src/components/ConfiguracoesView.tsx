@@ -300,11 +300,11 @@ export function ConfiguracoesView({
           Configurações, Usuários e Base de Dados
         </h1>
         <p className="text-sm text-slate-500 mt-1">
-          Gerencie operadores e permissões, execute a limpeza segura dos dados antigos e valide os 9 cenários obrigatórios do sistema.
+          Gerencie operadores e permissões, execute a limpeza segura dos dados antigos e valide os 11 cenários obrigatórios do sistema.
         </p>
       </div>
 
-      {/* 1. GERENCIAMENTO DE USUÁRIOS E PERMISSÕES (6 PERMISSÕES) */}
+      {/* 1. GERENCIAMENTO DE USUÁRIOS E PERMISSÕES (8 PERMISSÕES) */}
       {canManageUsers && (
         <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
           <div className="px-6 py-4 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
@@ -316,7 +316,7 @@ export function ConfiguracoesView({
                 </h2>
               </div>
               <p className="text-xs text-slate-500 mt-0.5">
-                Cadastre usuários com senha inicial e defina exatamente quais das 6 permissões cada operador pode acessar. Senhas nunca são gravadas no Firestore.
+                Cadastre usuários com senha inicial e defina exatamente quais das 8 permissões cada operador pode acessar. Senhas nunca são gravadas no Firestore.
               </p>
             </div>
             <button
@@ -438,7 +438,7 @@ export function ConfiguracoesView({
                 <div className="space-y-2.5 pt-2 border-t border-slate-200">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <span className="text-xs font-semibold text-slate-700">
-                      Permissões de Acesso (6 permissões)
+                      Permissões de Acesso (8 permissões)
                     </span>
                     <div className="flex items-center gap-3 text-xs">
                       <button
@@ -749,18 +749,18 @@ export function ConfiguracoesView({
         </div>
       )}
 
-      {/* 3. BATERIA DOS 9 CENÁRIOS OBRIGATÓRIOS */}
+      {/* 3. BATERIA DOS 11 CENÁRIOS OBRIGATÓRIOS */}
       <div className="bg-white border border-slate-200 rounded-xl p-6 space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div>
             <div className="flex items-center gap-2">
               <FlaskConical className="w-4 h-4 text-teal-600" />
               <h2 className="text-base font-semibold text-slate-900">
-                Verificação dos 9 Cenários Obrigatórios do Sistema
+                Verificação dos 11 Cenários Obrigatórios do Sistema
               </h2>
             </div>
             <p className="text-xs text-slate-500 mt-0.5">
-              Valida CPF e dígitos verificadores, importação de 4 colunas, classificação JÁ RECEBEU / NÃO RECEBEU, histórico permanente sem bloqueios, aviso de entrega repetida e RBAC de 6 permissões.
+              Valida CPF e dígitos verificadores, importação de 4 colunas, classificação JÁ RECEBEU / NÃO RECEBEU, devolução preservando histórico, histórico permanente sem bloqueios e RBAC de 8 permissões.
             </p>
           </div>
           <button
@@ -770,7 +770,7 @@ export function ConfiguracoesView({
             className="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold text-white bg-teal-700 hover:bg-teal-800 rounded-lg transition-colors whitespace-nowrap shrink-0"
           >
             <Play className="w-3.5 h-3.5" />
-            {runningTests ? 'Executando cenários...' : 'Executar 9 Cenários'}
+            {runningTests ? 'Executando cenários...' : 'Executar 11 Cenários'}
           </button>
         </div>
 
@@ -812,7 +812,7 @@ export function ConfiguracoesView({
           </h2>
         </div>
         <p className="text-xs text-slate-600 leading-relaxed">
-          Persistência em tempo real via <strong>Cloud Firestore + Firebase Auth</strong> com transações atômicas, regras de segurança aplicando as 6 permissões no servidor e proteção LGPD por índice SHA-256 com exibição mascarada do CPF.
+          Persistência em tempo real via <strong>Cloud Firestore + Firebase Auth</strong> com transações atômicas, regras de segurança aplicando as 8 permissões no servidor e proteção LGPD por índice SHA-256 com exibição mascarada do CPF.
         </p>
       </div>
 
@@ -873,7 +873,7 @@ export function ConfiguracoesView({
             <div className="space-y-2.5">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-semibold text-slate-700">
-                  Permissões do Usuário (6 permissões)
+                  Permissões do Usuário (8 permissões)
                 </span>
                 <div className="flex items-center gap-3 text-xs">
                   <button

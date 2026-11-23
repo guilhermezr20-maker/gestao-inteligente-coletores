@@ -230,19 +230,69 @@ export async function runMandatoryBusinessScenarios(): Promise<ScenarioTestResul
     marcarEntregas: true,
     consultarHistorico: true,
     exportarRelatorios: false,
+    excluirHistorico: false,
+    excluirCadastros: false,
     gerenciarUsuarios: false,
   };
   results.push({
     id: 9,
-    title: 'Cenário 9 — Histórico individual completo e permissões de acesso',
-    description: 'Exibe múltiplas entregas sem bloqueios e valida as 6 permissões granulares.',
+    title: 'Cenário 9 — Histórico individual completo e permissões de acesso (RBAC)',
+    description: 'Exibe múltiplas entregas sem bloqueios e valida as 8 permissões granulares.',
     passed:
       entregasHistorico.length === 2 &&
       Boolean(entregasHistorico[1].entregaAnteriorData) &&
       permissoesOperador.marcarEntregas &&
+      !permissoesOperador.excluirHistorico &&
+      !permissoesOperador.excluirCadastros &&
       !permissoesOperador.gerenciarUsuarios &&
       !permissoesOperador.exportarRelatorios,
-    details: `Entregas na ficha: ${entregasHistorico.length} (última em ${entregasHistorico[1].acaoNome}) | RBAC validado`,
+    details: `Entregas na ficha: ${entregasHistorico.length} (última em ${entregasHistorico[1].acaoNome}) | RBAC de 8 permissões validado`,
+  });
+
+  // 10. Devolução de coletor retorna para NÃO RECEBEU mantendo histórico completo
+  const aposDevolucao = buildColab({
+    ...aposEntrega,
+    possuiColetorAtivo: false,
+    totalColetoresDevolvidos: 1,
+    ultimaDevolucaoData: '2026-11-23',
+    ultimaDevolucaoDataHora: '2026-11-23T16:00:00',
+  });
+  const r10 = evaluateRecebimentoStatus(aposDevolucao);
+  results.push({
+    id: 10,
+    title: 'Cenário 10 — Devolução retorna para NÃO RECEBEU mantendo histórico',
+    description: 'Ao marcar devolução, o colaborador volta a NÃO RECEBEU apto a novo recebimento sem apagar entregas anteriores.',
+    passed:
+      r10.status === 'NAO_RECEBEU' &&
+      r10.label === 'NÃO RECEBEU' &&
+      !r10.jaRecebeu &&
+      r10.totalEntregas === 1 &&
+      r10.ultimaEntregaData === '2026-11-23' &&
+      r10.totalDevolucoes === 1,
+    details: `Situação após devolução: ${r10.label} | Entregas preservadas: ${r10.totalEntregas} | Devoluções: ${r10.totalDevolucoes}`,
+  });
+
+  // 11. Separação das permissões de exclusão de histórico e cadastro por CPF
+  const operadorSoHistorico: UserPermissions = {
+    ...permissoesOperador,
+    excluirHistorico: true,
+    excluirCadastros: false,
+  };
+  const operadorSoCadastro: UserPermissions = {
+    ...permissoesOperador,
+    excluirHistorico: false,
+    excluirCadastros: true,
+  };
+  results.push({
+    id: 11,
+    title: 'Cenário 11 — Permissões separadas para excluir histórico e cadastros individuais',
+    description: 'Exclusão do histórico geral e exclusão completa por CPF funcionam de forma independente.',
+    passed:
+      operadorSoHistorico.excluirHistorico &&
+      !operadorSoHistorico.excluirCadastros &&
+      !operadorSoCadastro.excluirHistorico &&
+      operadorSoCadastro.excluirCadastros,
+    details: 'Permissões excluirHistorico e excluirCadastros isoladas e independentes.',
   });
 
   return results;

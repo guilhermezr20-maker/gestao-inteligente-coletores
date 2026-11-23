@@ -189,7 +189,7 @@ export function RelatoriosView({
       Função: c.funcao,
       Situação: st.label,
       'Qtd. Entregas': st.totalEntregas,
-      'Última Entrega': st.jaRecebeu
+      'Última Entrega': st.ultimaEntregaData
         ? formatDateTimeBR(st.ultimaEntregaDataHora, st.ultimaEntregaData)
         : '—',
       'Última Empresa': c.ultimaEmpresaNome || '—',

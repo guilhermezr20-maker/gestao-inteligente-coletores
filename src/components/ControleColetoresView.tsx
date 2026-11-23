@@ -5,7 +5,9 @@ import {
   CheckCircle2,
   Eye,
   PackageCheck,
+  RotateCcw,
   Search,
+  Trash2,
   X,
 } from 'lucide-react';
 import { hashCpf, normalizeCpf, normalizeName } from '../lib/cpf';
@@ -16,8 +18,12 @@ import {
   getCentroCusto,
 } from '../lib/coletorStatus';
 import {
+  excluirColaboradorCompleto,
+  excluirLoteColaboradores,
   marcarColetorRecebido,
+  marcarDevolucaoColetor,
   marcarLoteComoRecebido,
+  marcarLoteDevolucao,
 } from '../lib/firestoreService';
 import type { Acao, Colaborador, ImportacaoItem } from '../types/domain';
 import { StatusBadge } from './StatusBadge';
@@ -29,6 +35,7 @@ interface ControleColetoresViewProps {
   importacaoItens: ImportacaoItem[];
   initialAcaoId?: string;
   canMarkDelivery: boolean;
+  canDeleteCadastro: boolean;
   onRefresh: () => Promise<void>;
   onOpenColaborador: (colaborador: Colaborador) => void;
 }
@@ -59,6 +66,7 @@ export function ControleColetoresView({
   importacaoItens,
   initialAcaoId,
   canMarkDelivery,
+  canDeleteCadastro,
   onRefresh,
   onOpenColaborador,
 }: ControleColetoresViewProps) {
@@ -71,6 +79,11 @@ export function ControleColetoresView({
   const [selectedHashes, setSelectedHashes] = useState<Set<string>>(new Set());
 
   const [pendingConfirmRows, setPendingConfirmRows] = useState<RowViewModel[] | null>(null);
+  const [pendingReturnState, setPendingReturnState] = useState<{
+    rows: RowViewModel[];
+    ignoredCount: number;
+  } | null>(null);
+  const [pendingDeleteRows, setPendingDeleteRows] = useState<RowViewModel[] | null>(null);
   const [saving, setSaving] = useState(false);
   const [feedback, setFeedback] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
 
@@ -192,6 +205,13 @@ export function ControleColetoresView({
     [filteredRows, selectedHashes]
   );
 
+  const selectedReturnableRows = useMemo(
+    () => selectedRows.filter((r) => r.statusInfo.jaRecebeu),
+    [selectedRows]
+  );
+
+  const canShowSelection = canMarkDelivery || canDeleteCadastro;
+
   const toggleSelect = (hash: string) => {
     setSelectedHashes((prev) => {
       const next = new Set(prev);
@@ -273,6 +293,120 @@ export function ControleColetoresView({
     executeMarkReceived(targets);
   };
 
+  const executeReturn = async (targets: RowViewModel[]) => {
+    if (!canMarkDelivery) return;
+    const validTargets = targets.filter((t) => t.statusInfo.jaRecebeu);
+    if (validTargets.length === 0) {
+      setPendingReturnState(null);
+      setFeedback({
+        type: 'err',
+        text: 'Nenhum dos colaboradores selecionados possui coletor marcado como JÁ RECEBEU.',
+      });
+      return;
+    }
+
+    setSaving(true);
+    setFeedback(null);
+    try {
+      if (validTargets.length === 1) {
+        const target = validTargets[0];
+        await marcarDevolucaoColetor(user, {
+          colaboradorHash: target.colaborador.cpfHash,
+          empresaNome: target.acaoContext?.empresaNome,
+          unidadeNome: target.acaoContext?.unidadeNome,
+          acaoId: target.acaoContext?.acaoId,
+          acaoNome: target.acaoContext?.acaoNome,
+        });
+        setFeedback({
+          type: 'ok',
+          text: `Devolução registrada para ${target.nome}. A situação retornou para NÃO RECEBEU mantendo o histórico completo.`,
+        });
+      } else {
+        const res = await marcarLoteDevolucao(
+          user,
+          validTargets.map((target) => ({
+            colaboradorHash: target.colaborador.cpfHash,
+            empresaNome: target.acaoContext?.empresaNome,
+            unidadeNome: target.acaoContext?.unidadeNome,
+            acaoId: target.acaoContext?.acaoId,
+            acaoNome: target.acaoContext?.acaoNome,
+          }))
+        );
+        setFeedback({
+          type: res.erros.length === 0 ? 'ok' : 'err',
+          text:
+            res.erros.length === 0
+              ? `${res.sucesso} devoluções registradas com sucesso. As situações retornaram para NÃO RECEBEU mantendo o histórico completo.`
+              : `${res.sucesso} devoluções registradas e ${res.erros.length} falharam.`,
+        });
+      }
+
+      setSelectedHashes(new Set());
+      setPendingReturnState(null);
+      await onRefresh();
+    } catch (err) {
+      setFeedback({
+        type: 'err',
+        text: err instanceof Error ? err.message : 'Erro ao registrar devolução.',
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const executeDeleteColaboradores = async (targets: RowViewModel[]) => {
+    if (!canDeleteCadastro || targets.length === 0) return;
+    setSaving(true);
+    setFeedback(null);
+    try {
+      if (targets.length === 1) {
+        const target = targets[0];
+        await excluirColaboradorCompleto(user, target.colaborador);
+        setSelectedHashes((prev) => {
+          const next = new Set(prev);
+          next.delete(target.colaborador.cpfHash);
+          return next;
+        });
+        setFeedback({
+          type: 'ok',
+          text: `Cadastro de ${target.nome} (${target.cpfMascarado}) e todos os registros vinculados ao CPF foram excluídos permanentemente.`,
+        });
+      } else {
+        const res = await excluirLoteColaboradores(
+          user,
+          targets.map((t) => t.colaborador)
+        );
+        const failedHashes = new Set(res.erros.map((e) => e.hash));
+        setSelectedHashes((prev) => {
+          const next = new Set(prev);
+          targets.forEach((t) => {
+            if (!failedHashes.has(t.colaborador.cpfHash)) {
+              next.delete(t.colaborador.cpfHash);
+            }
+          });
+          return next;
+        });
+        setFeedback({
+          type: res.erros.length === 0 ? 'ok' : 'err',
+          text:
+            res.erros.length === 0
+              ? `${res.sucesso} cadastros excluídos permanentemente com todos os registros vinculados aos respectivos CPFs.`
+              : `${res.sucesso} cadastros excluídos e ${res.erros.length} falharam.`,
+        });
+      }
+
+      setPendingDeleteRows(null);
+      await onRefresh();
+    } catch (err) {
+      setFeedback({
+        type: 'err',
+        text: err instanceof Error ? err.message : 'Erro ao excluir cadastro do colaborador.',
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const alreadyReceivedInPending = useMemo(
     () => (pendingConfirmRows ? pendingConfirmRows.filter((r) => r.statusInfo.jaRecebeu) : []),
     [pendingConfirmRows]
@@ -286,20 +420,53 @@ export function ControleColetoresView({
             Controle de Coletores
           </h1>
           <p className="text-sm text-slate-500 mt-1">
-            Confira pelo CPF quem já recebeu coletor e quem ainda não recebeu, e registre entregas individualmente ou em lote.
+            Confira pelo CPF quem já recebeu coletor e quem ainda não recebeu, registre entregas, devoluções ou gerencie cadastros.
           </p>
         </div>
 
-        {canMarkDelivery && selectedRows.length > 0 && (
-          <button
-            type="button"
-            disabled={saving}
-            onClick={() => requestMarkReceived(selectedRows)}
-            className="inline-flex items-center gap-2 px-4 py-2.5 text-xs font-semibold text-white bg-teal-700 hover:bg-teal-800 rounded-lg transition-colors whitespace-nowrap shrink-0 disabled:opacity-50"
-          >
-            <PackageCheck className="w-4 h-4" />
-            MARCAR COMO RECEBIDO ({selectedRows.length})
-          </button>
+        {canShowSelection && selectedRows.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
+            {canMarkDelivery && selectedReturnableRows.length > 0 && (
+              <button
+                type="button"
+                disabled={saving}
+                onClick={() =>
+                  setPendingReturnState({
+                    rows: selectedReturnableRows,
+                    ignoredCount: selectedRows.length - selectedReturnableRows.length,
+                  })
+                }
+                className="inline-flex items-center gap-2 px-4 py-2.5 text-xs font-semibold text-cyan-800 bg-cyan-50 border border-cyan-200 hover:bg-cyan-100 rounded-lg transition-colors whitespace-nowrap shrink-0 disabled:opacity-50"
+              >
+                <RotateCcw className="w-4 h-4" />
+                Marcar devolução ({selectedReturnableRows.length})
+              </button>
+            )}
+
+            {canMarkDelivery && (
+              <button
+                type="button"
+                disabled={saving}
+                onClick={() => requestMarkReceived(selectedRows)}
+                className="inline-flex items-center gap-2 px-4 py-2.5 text-xs font-semibold text-white bg-teal-700 hover:bg-teal-800 rounded-lg transition-colors whitespace-nowrap shrink-0 disabled:opacity-50"
+              >
+                <PackageCheck className="w-4 h-4" />
+                MARCAR COMO RECEBIDO ({selectedRows.length})
+              </button>
+            )}
+
+            {canDeleteCadastro && (
+              <button
+                type="button"
+                disabled={saving}
+                onClick={() => setPendingDeleteRows(selectedRows)}
+                className="inline-flex items-center gap-2 px-3.5 py-2.5 text-xs font-semibold text-rose-700 bg-white border border-rose-200 hover:bg-rose-50 rounded-lg transition-colors whitespace-nowrap shrink-0 disabled:opacity-50"
+              >
+                <Trash2 className="w-4 h-4" />
+                Excluir ({selectedRows.length})
+              </button>
+            )}
+          </div>
         )}
       </div>
 
@@ -407,7 +574,7 @@ export function ControleColetoresView({
           <table className="w-full text-left text-sm">
             <thead className="bg-slate-50 text-xs font-medium text-slate-600 border-b border-slate-200">
               <tr>
-                {canMarkDelivery && (
+                {canShowSelection && (
                   <th className="px-4 py-3 w-10">
                     <input
                       type="checkbox"
@@ -433,7 +600,7 @@ export function ControleColetoresView({
               {filteredRows.length === 0 ? (
                 <tr>
                   <td
-                    colSpan={canMarkDelivery ? 8 : 7}
+                    colSpan={canShowSelection ? 8 : 7}
                     className="px-4 py-12 text-center text-sm text-slate-400"
                   >
                     {rows.length === 0
@@ -444,9 +611,10 @@ export function ControleColetoresView({
               ) : (
                 filteredRows.map((row) => {
                   const checked = selectedHashes.has(row.colaborador.cpfHash);
+                  const hasPriorDelivery = Boolean(row.statusInfo.ultimaEntregaData);
                   return (
                     <tr key={row.colaborador.cpfHash} className="hover:bg-slate-50/70">
-                      {canMarkDelivery && (
+                      {canShowSelection && (
                         <td className="px-4 py-3">
                           <input
                             type="checkbox"
@@ -475,12 +643,23 @@ export function ControleColetoresView({
                         <StatusBadge status={row.statusInfo.status} />
                       </td>
                       <td className="px-4 py-3 font-mono-tabular text-xs text-slate-600 whitespace-nowrap">
-                        {row.statusInfo.jaRecebeu
-                          ? formatDateTimeBR(
-                              row.statusInfo.ultimaEntregaDataHora,
-                              row.statusInfo.ultimaEntregaData
-                            )
-                          : '—'}
+                        <div>
+                          {hasPriorDelivery
+                            ? formatDateTimeBR(
+                                row.statusInfo.ultimaEntregaDataHora,
+                                row.statusInfo.ultimaEntregaData
+                              )
+                            : '—'}
+                        </div>
+                        {!row.statusInfo.jaRecebeu && row.statusInfo.ultimaDevolucaoData && (
+                          <div className="text-[11px] text-cyan-700 mt-0.5">
+                            Devolvido:{' '}
+                            {formatDateTimeBR(
+                              row.statusInfo.ultimaDevolucaoDataHora,
+                              row.statusInfo.ultimaDevolucaoData
+                            )}
+                          </div>
+                        )}
                       </td>
                       <td className="px-4 py-3 text-right whitespace-nowrap">
                         <div className="inline-flex items-center gap-2">
@@ -493,6 +672,22 @@ export function ControleColetoresView({
                             <Eye className="w-3.5 h-3.5 text-slate-500" />
                             Ficha
                           </button>
+
+                          {canMarkDelivery && row.statusInfo.jaRecebeu && (
+                            <button
+                              type="button"
+                              disabled={saving}
+                              onClick={() =>
+                                setPendingReturnState({ rows: [row], ignoredCount: 0 })
+                              }
+                              title="Marcar devolução do coletor"
+                              className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-semibold text-cyan-800 bg-cyan-50 border border-cyan-200 hover:bg-cyan-100 rounded-lg transition-colors disabled:opacity-50"
+                            >
+                              <RotateCcw className="w-3.5 h-3.5" />
+                              Marcar devolução
+                            </button>
+                          )}
+
                           {canMarkDelivery && (
                             <button
                               type="button"
@@ -500,7 +695,20 @@ export function ControleColetoresView({
                               onClick={() => requestMarkReceived([row])}
                               className="px-3 py-1.5 text-xs font-semibold text-white bg-teal-700 hover:bg-teal-800 rounded-lg transition-colors disabled:opacity-50"
                             >
-                              MARCAR COMO RECEBIDO
+                              {row.statusInfo.jaRecebeu ? 'Nova entrega' : 'MARCAR COMO RECEBIDO'}
+                            </button>
+                          )}
+
+                          {canDeleteCadastro && (
+                            <button
+                              type="button"
+                              disabled={saving}
+                              onClick={() => setPendingDeleteRows([row])}
+                              title="Excluir cadastro individual por CPF"
+                              className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-rose-700 bg-white border border-rose-200 hover:bg-rose-50 rounded-lg transition-colors disabled:opacity-50"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                              Excluir
                             </button>
                           )}
                         </div>
@@ -514,7 +722,7 @@ export function ControleColetoresView({
         </div>
       </div>
 
-      {/* Modal de Sinalização de Recebimento Anterior (evita marcação acidental sem bloquear) */}
+      {/* Modal de Sinalização de Recebimento Anterior */}
       {pendingConfirmRows && (
         <div
           className="fixed inset-0 z-50 bg-slate-900/50 flex items-center justify-center p-4"
@@ -587,6 +795,220 @@ export function ControleColetoresView({
           </div>
         </div>
       )}
+
+      {/* Modal de Confirmação de Devolução de Coletor (Individual ou em Lote) */}
+      {pendingReturnState && pendingReturnState.rows.length > 0 && (
+        <div
+          className="fixed inset-0 z-50 bg-slate-900/50 flex items-center justify-center p-4"
+          role="dialog"
+          aria-modal="true"
+        >
+          <div className="bg-white border border-slate-200 rounded-xl max-w-lg w-full p-6 space-y-4">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-start gap-2.5">
+                <RotateCcw className="w-5 h-5 text-cyan-700 shrink-0 mt-0.5" />
+                <div>
+                  <h2 className="text-base font-bold text-slate-900">
+                    {pendingReturnState.rows.length === 1
+                      ? 'Confirmar devolução do coletor'
+                      : `Confirmar devolução em lote (${pendingReturnState.rows.length})`}
+                  </h2>
+                  <p className="text-xs text-slate-600 mt-1">
+                    {pendingReturnState.rows.length === 1 ? (
+                      <>
+                        A situação de <strong>{pendingReturnState.rows[0].nome}</strong> voltará
+                        para <strong>NÃO RECEBEU</strong>, mantendo todas as entregas anteriores e
+                        o registro desta devolução no histórico.
+                      </>
+                    ) : (
+                      <>
+                        A situação dos{' '}
+                        <strong>{pendingReturnState.rows.length} colaboradores selecionados</strong>{' '}
+                        voltará para <strong>NÃO RECEBEU</strong>, mantendo todas as entregas
+                        anteriores e os registros de devolução no histórico.
+                      </>
+                    )}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPendingReturnState(null)}
+                className="p-1 text-slate-400 hover:text-slate-700 rounded-lg"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {pendingReturnState.ignoredCount > 0 && (
+              <div className="px-3 py-2 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-800">
+                {pendingReturnState.ignoredCount === 1
+                  ? '1 colaborador selecionado já estava como NÃO RECEBEU e será ignorado.'
+                  : `${pendingReturnState.ignoredCount} colaboradores selecionados já estavam como NÃO RECEBEU e serão ignorados.`}
+              </div>
+            )}
+
+            {pendingReturnState.rows.length === 1 ? (
+              <div className="p-3.5 rounded-lg bg-slate-50 border border-slate-200 text-xs space-y-1">
+                <div className="font-medium text-slate-900">
+                  {pendingReturnState.rows[0].nome}
+                </div>
+                <div className="font-mono-tabular text-slate-600">
+                  CPF: {pendingReturnState.rows[0].cpfMascarado}
+                </div>
+                <div className="font-mono-tabular text-slate-600">
+                  Última entrega:{' '}
+                  {formatDateTimeBR(
+                    pendingReturnState.rows[0].statusInfo.ultimaEntregaDataHora,
+                    pendingReturnState.rows[0].statusInfo.ultimaEntregaData
+                  )}
+                </div>
+              </div>
+            ) : (
+              <div className="max-h-48 overflow-y-auto border border-slate-200 rounded-lg divide-y divide-slate-100">
+                {pendingReturnState.rows.map((r) => (
+                  <div
+                    key={r.colaborador.cpfHash}
+                    className="px-3.5 py-2.5 text-xs flex items-center justify-between gap-3"
+                  >
+                    <div>
+                      <div className="font-medium text-slate-900">{r.nome}</div>
+                      <div className="font-mono-tabular text-slate-500">{r.cpfMascarado}</div>
+                    </div>
+                    <div className="text-right font-mono-tabular text-slate-600">
+                      Última:{' '}
+                      {formatDateTimeBR(
+                        r.statusInfo.ultimaEntregaDataHora,
+                        r.statusInfo.ultimaEntregaData
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div className="flex items-center justify-end gap-2.5 pt-2">
+              <button
+                type="button"
+                disabled={saving}
+                onClick={() => setPendingReturnState(null)}
+                className="px-4 py-2 text-xs font-medium text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 rounded-lg"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={saving}
+                onClick={() => executeReturn(pendingReturnState.rows)}
+                className="px-4 py-2 text-xs font-semibold text-white bg-cyan-700 hover:bg-cyan-800 rounded-lg disabled:opacity-50"
+              >
+                {saving
+                  ? 'Registrando...'
+                  : pendingReturnState.rows.length === 1
+                    ? 'Confirmar devolução'
+                    : `Confirmar ${pendingReturnState.rows.length} devoluções`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Confirmação de Exclusão Individual ou em Lote por CPF */}
+      {pendingDeleteRows && pendingDeleteRows.length > 0 && (
+        <div
+          className="fixed inset-0 z-50 bg-slate-900/50 flex items-center justify-center p-4"
+          role="dialog"
+          aria-modal="true"
+        >
+          <div className="bg-white border border-rose-200 rounded-xl max-w-lg w-full p-6 space-y-4">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-start gap-2.5">
+                <Trash2 className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
+                <div>
+                  <h2 className="text-base font-bold text-slate-900">
+                    {pendingDeleteRows.length === 1
+                      ? 'Excluir cadastro individual por CPF'
+                      : `Excluir cadastros selecionados por CPF (${pendingDeleteRows.length})`}
+                  </h2>
+                  <p className="text-xs text-slate-600 mt-1">
+                    {pendingDeleteRows.length === 1 ? (
+                      <>
+                        Esta ação removerá permanentemente o cadastro de{' '}
+                        <strong>{pendingDeleteRows[0].nome}</strong>, todas as suas entregas,
+                        histórico individual e vínculos com planilhas importadas.
+                      </>
+                    ) : (
+                      <>
+                        Esta ação removerá permanentemente os cadastros de{' '}
+                        <strong>{pendingDeleteRows.length} colaboradores</strong>, todas as suas
+                        entregas, históricos individuais e vínculos com planilhas importadas.
+                      </>
+                    )}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPendingDeleteRows(null)}
+                className="p-1 text-slate-400 hover:text-slate-700 rounded-lg"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {pendingDeleteRows.length === 1 ? (
+              <div className="p-3.5 rounded-lg bg-rose-50/60 border border-rose-200 text-xs space-y-1 text-rose-900">
+                <div className="font-semibold">{pendingDeleteRows[0].nome}</div>
+                <div className="font-mono-tabular">CPF: {pendingDeleteRows[0].cpfMascarado}</div>
+                <div>
+                  {pendingDeleteRows[0].centroCusto} · {pendingDeleteRows[0].funcao}
+                </div>
+              </div>
+            ) : (
+              <div className="max-h-48 overflow-y-auto border border-rose-200 rounded-lg divide-y divide-rose-100 bg-rose-50/30">
+                {pendingDeleteRows.map((r) => (
+                  <div
+                    key={r.colaborador.cpfHash}
+                    className="px-3.5 py-2.5 text-xs flex items-center justify-between gap-3 text-rose-950"
+                  >
+                    <div>
+                      <div className="font-semibold">{r.nome}</div>
+                      <div className="font-mono-tabular text-rose-800/80">{r.cpfMascarado}</div>
+                    </div>
+                    <div className="text-right text-rose-800/80 truncate max-w-[200px]">
+                      {r.centroCusto}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div className="flex items-center justify-end gap-2.5 pt-2">
+              <button
+                type="button"
+                disabled={saving}
+                onClick={() => setPendingDeleteRows(null)}
+                className="px-4 py-2 text-xs font-medium text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 rounded-lg"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={saving}
+                onClick={() => executeDeleteColaboradores(pendingDeleteRows)}
+                className="px-4 py-2 text-xs font-semibold text-white bg-rose-600 hover:bg-rose-700 rounded-lg disabled:opacity-50"
+              >
+                {saving
+                  ? 'Excluindo...'
+                  : pendingDeleteRows.length === 1
+                    ? 'Excluir tudo deste CPF'
+                    : `Excluir tudo de ${pendingDeleteRows.length} CPFs`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
+

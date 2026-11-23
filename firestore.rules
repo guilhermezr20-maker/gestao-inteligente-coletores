@@ -83,14 +83,17 @@ service cloud.firestore {
         ])
         && perms.keys().hasOnly([
           'importarPlanilhas', 'visualizarColaboradores', 'marcarEntregas',
-          'consultarHistorico', 'exportarRelatorios', 'gerenciarUsuarios'
+          'consultarHistorico', 'exportarRelatorios', 'excluirHistorico',
+          'excluirCadastros', 'gerenciarUsuarios'
         ])
         && perms.importarPlanilhas is bool
         && perms.visualizarColaboradores is bool
         && perms.marcarEntregas is bool
         && perms.consultarHistorico is bool
         && perms.exportarRelatorios is bool
-        && perms.gerenciarUsuarios is bool;
+        && perms.gerenciarUsuarios is bool
+        && (!('excluirHistorico' in perms) || perms.excluirHistorico is bool)
+        && (!('excluirCadastros' in perms) || perms.excluirCadastros is bool);
     }
 
     function isValidUserProfile(data, userId) {
@@ -188,7 +191,9 @@ service cloud.firestore {
           'id', 'cpfHash', 'cpfMascarado', 'nome', 'nomeNormalizado', 'centroCusto', 'funcao',
           'ultimaEmpresaId', 'ultimaEmpresaNome', 'ultimaUnidadeId', 'ultimaUnidadeNome',
           'ultimaAcaoId', 'ultimaAcaoNome', 'ultimaEntregaId', 'ultimaEntregaData',
-          'ultimaEntregaDataHora', 'totalColetoresRecebidos', 'createdByUid', 'createdAt', 'updatedAt'
+          'ultimaEntregaDataHora', 'possuiColetorAtivo', 'ultimaDevolucaoData',
+          'ultimaDevolucaoDataHora', 'totalColetoresDevolvidos',
+          'totalColetoresRecebidos', 'createdByUid', 'createdAt', 'updatedAt'
         ])
         && isValidHash(data.id)
         && data.id == colaboradorId
@@ -208,6 +213,10 @@ service cloud.firestore {
         && (!('ultimaEntregaId' in data) || (data.ultimaEntregaId is string && data.ultimaEntregaId.size() <= 128))
         && (!('ultimaEntregaData' in data) || (data.ultimaEntregaData is string && data.ultimaEntregaData.size() <= 20))
         && (!('ultimaEntregaDataHora' in data) || (data.ultimaEntregaDataHora is string && data.ultimaEntregaDataHora.size() <= 32))
+        && (!('possuiColetorAtivo' in data) || data.possuiColetorAtivo is bool)
+        && (!('ultimaDevolucaoData' in data) || (data.ultimaDevolucaoData is string && data.ultimaDevolucaoData.size() <= 20))
+        && (!('ultimaDevolucaoDataHora' in data) || (data.ultimaDevolucaoDataHora is string && data.ultimaDevolucaoDataHora.size() <= 32))
+        && (!('totalColetoresDevolvidos' in data) || (data.totalColetoresDevolvidos is int && data.totalColetoresDevolvidos >= 0))
         && data.totalColetoresRecebidos is int && data.totalColetoresRecebidos >= 0
         && isValidId(data.createdByUid)
         && data.createdAt is timestamp
@@ -225,7 +234,7 @@ service cloud.firestore {
         && data.id == historicoId
         && isValidHash(data.colaboradorHash)
         && data.cpfMascarado is string && data.cpfMascarado.size() >= 8 && data.cpfMascarado.size() <= 20
-        && data.tipo in ['CADASTRO_INICIAL', 'ATUALIZACAO_CADASTRAL', 'PARTICIPACAO_ACAO', 'ENTREGA_COLETOR']
+        && data.tipo in ['CADASTRO_INICIAL', 'ATUALIZACAO_CADASTRAL', 'PARTICIPACAO_ACAO', 'ENTREGA_COLETOR', 'DEVOLUCAO_COLETOR']
         && data.descricao is string && data.descricao.size() >= 2 && data.descricao.size() <= 500
         && (!('empresaNome' in data) || (data.empresaNome is string && data.empresaNome.size() <= 180))
         && (!('unidadeNome' in data) || (data.unidadeNome is string && data.unidadeNome.size() <= 180))
@@ -469,7 +478,7 @@ service cloud.firestore {
         && exists(/databases/$(database)/documents/empresas/$(incoming().empresaId))
         && exists(/databases/$(database)/documents/unidades/$(incoming().unidadeId));
       allow update: if isValidId(acaoId)
-        && (hasPerm('importarPlanilhas') || hasPerm('marcarEntregas'))
+        && (hasPerm('importarPlanilhas') || hasPerm('marcarEntregas') || hasPerm('excluirCadastros'))
         && isValidAcao(incoming(), acaoId)
         && incoming().id == existing().id
         && incoming().createdByUid == existing().createdByUid
@@ -477,7 +486,8 @@ service cloud.firestore {
         && incoming().updatedAt == request.time
         && (
           isAdmin() ||
-          (existing().status == 'aberta' && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'totalColaboradores', 'updatedAt']))
+          (existing().status == 'aberta' && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'totalColaboradores', 'updatedAt'])) ||
+          (hasPerm('excluirCadastros') && incoming().diff(existing()).affectedKeys().hasOnly(['totalColaboradores', 'updatedAt']))
         );
       allow delete: if isValidId(acaoId) && isBootstrappedAdmin();
     }
@@ -509,10 +519,17 @@ service cloud.firestore {
           (hasPerm('marcarEntregas') && incoming().diff(existing()).affectedKeys().hasOnly([
             'ultimaEmpresaId', 'ultimaEmpresaNome', 'ultimaUnidadeId', 'ultimaUnidadeNome',
             'ultimaAcaoId', 'ultimaAcaoNome', 'ultimaEntregaId', 'ultimaEntregaData',
-            'ultimaEntregaDataHora', 'totalColetoresRecebidos', 'updatedAt'
+            'ultimaEntregaDataHora', 'possuiColetorAtivo', 'ultimaDevolucaoData',
+            'ultimaDevolucaoDataHora', 'totalColetoresDevolvidos',
+            'totalColetoresRecebidos', 'updatedAt'
+          ])) ||
+          (hasPerm('excluirHistorico') && incoming().diff(existing()).affectedKeys().hasOnly([
+            'possuiColetorAtivo', 'ultimaEntregaId', 'ultimaEntregaData',
+            'ultimaEntregaDataHora', 'ultimaDevolucaoData', 'ultimaDevolucaoDataHora',
+            'totalColetoresDevolvidos', 'totalColetoresRecebidos', 'updatedAt'
           ]))
         );
-      allow delete: if isValidHash(colaboradorId) && isBootstrappedAdmin();
+      allow delete: if isValidHash(colaboradorId) && (isBootstrappedAdmin() || hasPerm('excluirCadastros'));
     }
 
     match /colaboradores_historico/{historicoId} {
@@ -525,7 +542,7 @@ service cloud.firestore {
         && incoming().createdAt == request.time
         && existsAfter(/databases/$(database)/documents/colaboradores/$(incoming().colaboradorHash));
       allow update: if false;
-      allow delete: if isValidId(historicoId) && isBootstrappedAdmin();
+      allow delete: if isValidId(historicoId) && (isBootstrappedAdmin() || hasPerm('excluirCadastros') || hasPerm('excluirHistorico'));
     }
 
     match /importacoes/{importacaoId} {
@@ -561,7 +578,7 @@ service cloud.firestore {
         && incoming().createdAt == existing().createdAt
         && incoming().updatedAt == request.time
         && (isAdmin() || incoming().diff(existing()).affectedKeys().hasOnly(['importacaoId', 'colaboradorNome', 'centroCusto', 'funcao', 'updatedAt']));
-      allow delete: if isValidId(itemId) && isBootstrappedAdmin();
+      allow delete: if isValidId(itemId) && (isBootstrappedAdmin() || hasPerm('excluirCadastros'));
     }
 
     match /entregas/{entregaId} {
@@ -577,7 +594,7 @@ service cloud.firestore {
         && exists(/databases/$(database)/documents/acoes/$(incoming().acaoId))
         && getAfter(/databases/$(database)/documents/colaboradores/$(incoming().colaboradorHash)).data.ultimaEntregaId == entregaId;
       allow update: if false;
-      allow delete: if isValidId(entregaId) && isBootstrappedAdmin();
+      allow delete: if isValidId(entregaId) && (isBootstrappedAdmin() || hasPerm('excluirHistorico') || hasPerm('excluirCadastros'));
     }
 
     // Coleções legadas preservadas somente para leitura/exclusão durante reinicialização segura pelo admin principal

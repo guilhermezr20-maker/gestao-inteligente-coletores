@@ -70,7 +70,7 @@ function hasMenuPermission(
     case 'controle':
       return perms.visualizarColaboradores || perms.marcarEntregas;
     case 'historico':
-      return perms.consultarHistorico;
+      return perms.consultarHistorico || perms.excluirHistorico;
     case 'relatorios':
       return perms.exportarRelatorios || perms.visualizarColaboradores || perms.consultarHistorico;
     case 'configuracoes':
@@ -421,6 +421,7 @@ function MainApp() {
                   importacaoItens={importacaoItens}
                   initialAcaoId={selectedAcaoForControle}
                   canMarkDelivery={isMasterAdmin || effectivePermissions.marcarEntregas}
+                  canDeleteCadastro={isMasterAdmin || effectivePermissions.excluirCadastros}
                   onRefresh={refreshData}
                   onOpenColaborador={(colaborador) => setSelectedColaboradorForFicha(colaborador)}
                 />
@@ -428,11 +429,14 @@ function MainApp() {
 
               {activeMenu === 'historico' && (
                 <HistoricoEntregasView
+                  user={user}
                   empresas={empresas}
                   unidades={unidades}
                   acoes={acoes}
                   colaboradores={colaboradores}
                   entregas={entregas}
+                  canDeleteHistorico={isMasterAdmin || effectivePermissions.excluirHistorico}
+                  onRefresh={refreshData}
                   onOpenColaborador={(colaborador) => setSelectedColaboradorForFicha(colaborador)}
                 />
               )}
@@ -466,6 +470,10 @@ function MainApp() {
         <ColaboradorFichaModal
           user={user}
           colaborador={activeFichaColaborador}
+          canMarkDelivery={isMasterAdmin || effectivePermissions.marcarEntregas}
+          canDeleteCadastro={isMasterAdmin || effectivePermissions.excluirCadastros}
+          onRefresh={refreshData}
+          onDeleted={() => setSelectedColaboradorForFicha(null)}
           onClose={() => setSelectedColaboradorForFicha(null)}
         />
       )}

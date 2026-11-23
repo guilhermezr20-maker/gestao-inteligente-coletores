@@ -6,6 +6,8 @@ export interface UserPermissions {
   marcarEntregas: boolean;
   consultarHistorico: boolean;
   exportarRelatorios: boolean;
+  excluirHistorico: boolean;
+  excluirCadastros: boolean;
   gerenciarUsuarios: boolean;
 }
 
@@ -28,8 +30,8 @@ export const PERMISSION_DEFINITIONS: Array<{
   },
   {
     key: 'marcarEntregas',
-    label: 'Marcar entregas',
-    description: 'Registrar individualmente ou em lote o botão "MARCAR COMO RECEBIDO".',
+    label: 'Marcar entregas e devoluções',
+    description: 'Registrar entregas ("MARCAR COMO RECEBIDO") e devoluções de coletores.',
   },
   {
     key: 'consultarHistorico',
@@ -40,6 +42,16 @@ export const PERMISSION_DEFINITIONS: Array<{
     key: 'exportarRelatorios',
     label: 'Exportar relatórios',
     description: 'Visualizar indicadores e exportar listas e históricos para Excel (.xlsx).',
+  },
+  {
+    key: 'excluirHistorico',
+    label: 'Excluir histórico geral',
+    description: 'Remover registros individuais ou limpar todo o histórico de entregas.',
+  },
+  {
+    key: 'excluirCadastros',
+    label: 'Excluir cadastros individuais',
+    description: 'Excluir permanentemente o cadastro de um colaborador e todos os registros do CPF.',
   },
   {
     key: 'gerenciarUsuarios',
@@ -54,6 +66,8 @@ export const ALL_ADMIN_PERMISSIONS: UserPermissions = {
   marcarEntregas: true,
   consultarHistorico: true,
   exportarRelatorios: true,
+  excluirHistorico: true,
+  excluirCadastros: true,
   gerenciarUsuarios: true,
 };
 
@@ -63,6 +77,8 @@ export const DEFAULT_OPERADOR_PERMISSIONS: UserPermissions = {
   marcarEntregas: true,
   consultarHistorico: true,
   exportarRelatorios: true,
+  excluirHistorico: false,
+  excluirCadastros: false,
   gerenciarUsuarios: false,
 };
 
@@ -139,6 +155,9 @@ export interface ColaboradorStatusInfo {
   totalEntregas: number;
   ultimaEntregaData: string | null;
   ultimaEntregaDataHora: string | null;
+  totalDevolucoes: number;
+  ultimaDevolucaoData: string | null;
+  ultimaDevolucaoDataHora: string | null;
 }
 
 export interface Colaborador {
@@ -159,6 +178,10 @@ export interface Colaborador {
   ultimaEntregaId?: string;
   ultimaEntregaData?: string;
   ultimaEntregaDataHora?: string;
+  possuiColetorAtivo?: boolean;
+  ultimaDevolucaoData?: string;
+  ultimaDevolucaoDataHora?: string;
+  totalColetoresDevolvidos?: number;
   totalColetoresRecebidos: number;
   createdByUid: string;
   createdAt?: unknown;
@@ -169,7 +192,8 @@ export type HistoricoTipo =
   | 'CADASTRO_INICIAL'
   | 'ATUALIZACAO_CADASTRAL'
   | 'PARTICIPACAO_ACAO'
-  | 'ENTREGA_COLETOR';
+  | 'ENTREGA_COLETOR'
+  | 'DEVOLUCAO_COLETOR';
 
 export interface ColaboradorHistorico {
   id: string;

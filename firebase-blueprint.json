@@ -2,7 +2,7 @@
   "entities": {
     "UserProfile": {
       "title": "UserProfile",
-      "description": "Perfil de usuário autenticado e suas 6 permissões granulares no sistema.",
+      "description": "Perfil de usuário autenticado e suas 8 permissões granulares no sistema.",
       "type": "object",
       "properties": {
         "uid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
@@ -122,6 +122,10 @@
         "ultimaEntregaId": { "type": "string", "maxLength": 128 },
         "ultimaEntregaData": { "type": "string", "maxLength": 20 },
         "ultimaEntregaDataHora": { "type": "string", "maxLength": 32 },
+        "possuiColetorAtivo": { "type": "boolean" },
+        "ultimaDevolucaoData": { "type": "string", "maxLength": 20 },
+        "ultimaDevolucaoDataHora": { "type": "string", "maxLength": 32 },
+        "totalColetoresDevolvidos": { "type": "integer" },
         "totalColetoresRecebidos": { "type": "integer" },
         "createdByUid": { "type": "string", "maxLength": 128 },
         "createdAt": { "type": "string", "format": "date-time" },
@@ -131,13 +135,13 @@
     },
     "ColaboradorHistorico": {
       "title": "ColaboradorHistorico",
-      "description": "Histórico permanente de movimentações cadastrais e entregas de coletores.",
+      "description": "Histórico permanente de movimentações cadastrais, entregas e devoluções de coletores.",
       "type": "object",
       "properties": {
         "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
         "colaboradorHash": { "type": "string", "maxLength": 64, "pattern": "^[a-f0-9]{64}$" },
         "cpfMascarado": { "type": "string", "maxLength": 20 },
-        "tipo": { "type": "string", "enum": ["CADASTRO_INICIAL", "ATUALIZACAO_CADASTRAL", "PARTICIPACAO_ACAO", "ENTREGA_COLETOR"] },
+        "tipo": { "type": "string", "enum": ["CADASTRO_INICIAL", "ATUALIZACAO_CADASTRAL", "PARTICIPACAO_ACAO", "ENTREGA_COLETOR", "DEVOLUCAO_COLETOR"] },
         "descricao": { "type": "string", "maxLength": 500 },
         "empresaNome": { "type": "string", "maxLength": 180 },
         "unidadeNome": { "type": "string", "maxLength": 180 },

@@ -80,6 +80,8 @@ export function resolveEffectivePermissions(profile: UserProfile): UserPermissio
       marcarEntregas: Boolean(p.marcarEntregas ?? p.entregarColetores ?? ALL_ADMIN_PERMISSIONS.marcarEntregas),
       consultarHistorico: Boolean(p.consultarHistorico ?? ALL_ADMIN_PERMISSIONS.consultarHistorico),
       exportarRelatorios: Boolean(p.exportarRelatorios ?? ALL_ADMIN_PERMISSIONS.exportarRelatorios),
+      excluirHistorico: Boolean(p.excluirHistorico ?? ALL_ADMIN_PERMISSIONS.excluirHistorico),
+      excluirCadastros: Boolean(p.excluirCadastros ?? ALL_ADMIN_PERMISSIONS.excluirCadastros),
       gerenciarUsuarios: Boolean(p.gerenciarUsuarios ?? ALL_ADMIN_PERMISSIONS.gerenciarUsuarios),
     };
   }
@@ -89,6 +91,8 @@ export function resolveEffectivePermissions(profile: UserProfile): UserPermissio
     marcarEntregas: Boolean(p.marcarEntregas ?? p.entregarColetores ?? DEFAULT_OPERADOR_PERMISSIONS.marcarEntregas),
     consultarHistorico: Boolean(p.consultarHistorico ?? DEFAULT_OPERADOR_PERMISSIONS.consultarHistorico),
     exportarRelatorios: Boolean(p.exportarRelatorios ?? DEFAULT_OPERADOR_PERMISSIONS.exportarRelatorios),
+    excluirHistorico: Boolean(p.excluirHistorico ?? DEFAULT_OPERADOR_PERMISSIONS.excluirHistorico),
+    excluirCadastros: Boolean(p.excluirCadastros ?? DEFAULT_OPERADOR_PERMISSIONS.excluirCadastros),
     gerenciarUsuarios: Boolean(p.gerenciarUsuarios ?? DEFAULT_OPERADOR_PERMISSIONS.gerenciarUsuarios),
   };
 }
@@ -892,6 +896,8 @@ export async function commitCollaboratorImport(
           ultimaUnidadeNome: params.unidade.nome,
           ultimaAcaoId: params.acao.id,
           ultimaAcaoNome: params.acao.nome,
+          possuiColetorAtivo: false,
+          totalColetoresDevolvidos: 0,
           totalColetoresRecebidos: 0,
           createdByUid: user.uid,
           createdAt: serverTimestamp(),
@@ -1135,7 +1141,6 @@ export async function marcarColetorRecebido(
 
       tx.set(entregaRef, entregaDoc);
       tx.update(colabRef, {
-        centroCusto,
         ultimaEmpresaId: params.empresaId,
         ultimaEmpresaNome: params.empresaNome,
         ultimaUnidadeId: params.unidadeId,
@@ -1145,14 +1150,8 @@ export async function marcarColetorRecebido(
         ultimaEntregaId: entregaId,
         ultimaEntregaData: dataEntrega,
         ultimaEntregaDataHora: dataHoraEntrega,
+        possuiColetorAtivo: true,
         totalColetoresRecebidos: (colab.totalColetoresRecebidos || 0) + 1,
-        // Limpa eventuais campos legados se ainda existirem antes de reset
-        setor: deleteField(),
-        possuiColetorPendente: deleteField(),
-        proximoElegivelData: deleteField(),
-        ultimoExameData: deleteField(),
-        totalColetoresUtilizados: deleteField(),
-        totalExamesRealizados: deleteField(),
         updatedAt: serverTimestamp(),
       });
 
@@ -1227,3 +1226,364 @@ export async function marcarLoteComoRecebido(
 
   return { sucesso, erros };
 }
+
+// ---------------------------------------------------------------------------
+// Devolução de Coletor (Retorna para NÃO RECEBEU mantendo histórico completo)
+// ---------------------------------------------------------------------------
+
+export async function marcarDevolucaoColetor(
+  user: User,
+  params: {
+    colaboradorHash: string;
+    empresaNome?: string;
+    unidadeNome?: string;
+    acaoId?: string;
+    acaoNome?: string;
+    dataDevolucaoISO?: string;
+    dataHoraDevolucaoISO?: string;
+  }
+): Promise<void> {
+  const dataDevolucao = params.dataDevolucaoISO || getTodayISO();
+  const dataHoraDevolucao = params.dataHoraDevolucaoISO || getNowDateTimeISO();
+  const histId = makeId('hist');
+  const auditId = makeId('aud');
+  const responsavelNome = user.displayName || user.email || 'Operador';
+
+  const colabRef = doc(db, 'colaboradores', params.colaboradorHash);
+  const histRef = doc(db, 'colaboradores_historico', histId);
+  const auditRef = doc(db, 'auditoria', auditId);
+
+  try {
+    await runTransaction(db, async (tx) => {
+      const colabSnap = await tx.get(colabRef);
+      if (!colabSnap.exists()) {
+        throw new Error('Colaborador não encontrado no banco de dados.');
+      }
+
+      const colab = colabSnap.data() as Colaborador;
+      const statusAtual = evaluateRecebimentoStatus(colab);
+      if (!statusAtual.jaRecebeu) {
+        throw new Error('Este colaborador já consta como NÃO RECEBEU.');
+      }
+
+      const empresaNome = params.empresaNome || colab.ultimaEmpresaNome;
+      const unidadeNome = params.unidadeNome || colab.ultimaUnidadeNome;
+      const acaoId = params.acaoId || colab.ultimaAcaoId;
+      const acaoNome = params.acaoNome || colab.ultimaAcaoNome;
+
+      tx.update(colabRef, {
+        possuiColetorAtivo: false,
+        ultimaDevolucaoData: dataDevolucao,
+        ultimaDevolucaoDataHora: dataHoraDevolucao,
+        totalColetoresDevolvidos: (colab.totalColetoresDevolvidos || 0) + 1,
+        updatedAt: serverTimestamp(),
+      });
+
+      tx.set(
+        histRef,
+        stripUndefined({
+          id: histId,
+          colaboradorHash: colab.cpfHash,
+          cpfMascarado: colab.cpfMascarado,
+          tipo: 'DEVOLUCAO_COLETOR',
+          descricao: `Devolução de coletor registrada em ${formatDateTimeBR(dataHoraDevolucao, dataDevolucao)}. Situação retornada para NÃO RECEBEU preservando o histórico anterior.`,
+          empresaNome,
+          unidadeNome,
+          acaoId,
+          acaoNome,
+          dataEvento: dataDevolucao,
+          createdByUid: user.uid,
+          usuarioNome: responsavelNome,
+          createdAt: serverTimestamp(),
+        })
+      );
+
+      tx.set(auditRef, {
+        id: auditId,
+        tipo: 'DEVOLUCAO',
+        entidade: 'colaboradores',
+        entidadeId: colab.cpfHash,
+        descricao: `Devolução de coletor registrada para ${colab.nome} (${colab.cpfMascarado}). Situação retornada para NÃO RECEBEU.`,
+        createdByUid: user.uid,
+        usuarioNome: responsavelNome,
+        usuarioEmail: user.email || '',
+        createdAt: serverTimestamp(),
+      });
+    });
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      (error.message.includes('não encontrado') || error.message.includes('NÃO RECEBEU'))
+    ) {
+      throw error;
+    }
+    handleFirestoreError(error, OperationType.WRITE, `colaboradores/${params.colaboradorHash}`);
+  }
+}
+
+export async function marcarLoteDevolucao(
+  user: User,
+  itens: Array<{
+    colaboradorHash: string;
+    empresaNome?: string;
+    unidadeNome?: string;
+    acaoId?: string;
+    acaoNome?: string;
+  }>
+): Promise<{ sucesso: number; erros: Array<{ hash: string; motivo: string }> }> {
+  let sucesso = 0;
+  const erros: Array<{ hash: string; motivo: string }> = [];
+
+  for (const item of itens) {
+    try {
+      await marcarDevolucaoColetor(user, item);
+      sucesso++;
+    } catch (error) {
+      erros.push({
+        hash: item.colaboradorHash,
+        motivo: error instanceof Error ? error.message : 'Erro ao registrar devolução.',
+      });
+    }
+  }
+
+  return { sucesso, erros };
+}
+
+// ---------------------------------------------------------------------------
+// Exclusão de Histórico Geral (Individual ou Todo o Histórico de Entregas)
+// ---------------------------------------------------------------------------
+
+export async function excluirEntregaIndividual(user: User, entrega: Entrega): Promise<void> {
+  const path = `entregas/${entrega.id}`;
+  try {
+    const [entregasColabSnap, colabSnap] = await Promise.all([
+      getDocs(
+        buildListQuery('entregas', user, [
+          where('colaboradorHash', '==', entrega.colaboradorHash),
+        ])
+      ),
+      getDoc(doc(db, 'colaboradores', entrega.colaboradorHash)),
+    ]);
+
+    await deleteDoc(doc(db, 'entregas', entrega.id));
+
+    if (colabSnap.exists()) {
+      const colab = colabSnap.data() as Colaborador;
+      const remaining = entregasColabSnap.docs
+        .map((d) => d.data() as Entrega)
+        .filter((e) => e.id !== entrega.id)
+        .sort((a, b) =>
+          (b.dataHoraEntrega || b.dataEntrega).localeCompare(a.dataHoraEntrega || a.dataEntrega)
+        );
+
+      const colabRef = doc(db, 'colaboradores', entrega.colaboradorHash);
+      if (remaining.length === 0) {
+        await updateDoc(colabRef, {
+          possuiColetorAtivo: false,
+          totalColetoresRecebidos: 0,
+          ultimaEntregaId: deleteField(),
+          ultimaEntregaData: deleteField(),
+          ultimaEntregaDataHora: deleteField(),
+          updatedAt: serverTimestamp(),
+        });
+      } else {
+        const latest = remaining[0];
+        const latestTime = latest.dataHoraEntrega || latest.dataEntrega;
+        const returnedAfterLatest = Boolean(
+          colab.ultimaDevolucaoDataHora && colab.ultimaDevolucaoDataHora > latestTime
+        );
+        const nextAtivo =
+          colab.possuiColetorAtivo === false
+            ? entrega.id === colab.ultimaEntregaId
+              ? !returnedAfterLatest
+              : false
+            : !returnedAfterLatest;
+
+        await updateDoc(colabRef, {
+          possuiColetorAtivo: nextAtivo,
+          totalColetoresRecebidos: remaining.length,
+          ultimaEntregaId: latest.id,
+          ultimaEntregaData: latest.dataEntrega,
+          ultimaEntregaDataHora: latest.dataHoraEntrega,
+          updatedAt: serverTimestamp(),
+        });
+      }
+    }
+
+    await registerAudit(
+      user,
+      'EXCLUSAO_HISTORICO',
+      'entregas',
+      entrega.id,
+      `Registro de entrega removido do histórico para ${entrega.colaboradorNome} (${entrega.cpfMascarado}) em ${formatDateTimeBR(entrega.dataHoraEntrega, entrega.dataEntrega)}.`
+    );
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
+  }
+}
+
+export async function excluirTodoHistoricoEntregas(user: User): Promise<{
+  deletedEntregas: number;
+}> {
+  try {
+    const [entregasSnap, colabsSnap, histSnap] = await Promise.all([
+      getDocs(buildListQuery('entregas', user)),
+      getDocs(buildListQuery('colaboradores', user)),
+      getDocs(buildListQuery('colaboradores_historico', user)),
+    ]);
+
+    const deliveryHistDocs = histSnap.docs.filter((d) => {
+      const tipo = (d.data() as ColaboradorHistorico).tipo;
+      return tipo === 'ENTREGA_COLETOR' || tipo === 'DEVOLUCAO_COLETOR';
+    });
+
+    type PendingOp =
+      | { kind: 'delete'; ref: (typeof entregasSnap.docs)[number]['ref'] }
+      | { kind: 'resetColab'; ref: (typeof colabsSnap.docs)[number]['ref'] };
+
+    const ops: PendingOp[] = [
+      ...entregasSnap.docs.map((d) => ({ kind: 'delete' as const, ref: d.ref })),
+      ...deliveryHistDocs.map((d) => ({ kind: 'delete' as const, ref: d.ref })),
+      ...colabsSnap.docs.map((d) => ({ kind: 'resetColab' as const, ref: d.ref })),
+    ];
+
+    const chunkSize = 300;
+    for (let i = 0; i < ops.length; i += chunkSize) {
+      const chunk = ops.slice(i, i + chunkSize);
+      const batch = writeBatch(db);
+      for (const op of chunk) {
+        if (op.kind === 'delete') {
+          batch.delete(op.ref);
+        } else {
+          batch.update(op.ref, {
+            possuiColetorAtivo: false,
+            totalColetoresRecebidos: 0,
+            totalColetoresDevolvidos: 0,
+            ultimaEntregaId: deleteField(),
+            ultimaEntregaData: deleteField(),
+            ultimaEntregaDataHora: deleteField(),
+            ultimaDevolucaoData: deleteField(),
+            ultimaDevolucaoDataHora: deleteField(),
+            updatedAt: serverTimestamp(),
+          });
+        }
+      }
+      await batch.commit();
+    }
+
+    await registerAudit(
+      user,
+      'EXCLUSAO_HISTORICO_GERAL',
+      'entregas',
+      'historico_geral',
+      `Histórico geral de entregas limpo (${entregasSnap.size} registros removidos). Todos os colaboradores retornaram para NÃO RECEBEU.`
+    );
+
+    return { deletedEntregas: entregasSnap.size };
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, 'entregas');
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Exclusão Individual Completa de Colaborador por CPF
+// ---------------------------------------------------------------------------
+
+export async function excluirColaboradorCompleto(
+  user: User,
+  colaborador: Colaborador
+): Promise<{
+  deletedEntregas: number;
+  deletedHistorico: number;
+  deletedItens: number;
+}> {
+  const hash = colaborador.cpfHash;
+  const path = `colaboradores/${hash}`;
+  try {
+    const [entregasSnap, histSnap, itensSnap] = await Promise.all([
+      getDocs(buildListQuery('entregas', user, [where('colaboradorHash', '==', hash)])),
+      getDocs(
+        buildListQuery('colaboradores_historico', user, [where('colaboradorHash', '==', hash)])
+      ),
+      getDocs(
+        buildListQuery('importacao_itens', user, [where('colaboradorHash', '==', hash)])
+      ),
+    ]);
+
+    const affectedAcaoIds = Array.from(
+      new Set(itensSnap.docs.map((d) => (d.data() as ImportacaoItem).acaoId).filter(Boolean))
+    );
+
+    const refsToDelete = [
+      doc(db, 'colaboradores', hash),
+      ...entregasSnap.docs.map((d) => d.ref),
+      ...histSnap.docs.map((d) => d.ref),
+      ...itensSnap.docs.map((d) => d.ref),
+    ];
+
+    const chunkSize = 300;
+    for (let i = 0; i < refsToDelete.length; i += chunkSize) {
+      const chunk = refsToDelete.slice(i, i + chunkSize);
+      const batch = writeBatch(db);
+      chunk.forEach((r) => batch.delete(r));
+      await batch.commit();
+    }
+
+    for (const acaoId of affectedAcaoIds) {
+      try {
+        const acaoRef = doc(db, 'acoes', acaoId);
+        const [acaoSnap, remainingItensSnap] = await Promise.all([
+          getDoc(acaoRef),
+          getDocs(buildListQuery('importacao_itens', user, [where('acaoId', '==', acaoId)])),
+        ]);
+        if (acaoSnap.exists()) {
+          await updateDoc(acaoRef, {
+            totalColaboradores: remainingItensSnap.size,
+            updatedAt: serverTimestamp(),
+          });
+        }
+      } catch {
+        // Ignora caso a ação já não exista ou não possua permissão de contagem
+      }
+    }
+
+    await registerAudit(
+      user,
+      'EXCLUSAO_COLABORADOR',
+      'colaboradores',
+      hash,
+      `Cadastro completo do colaborador ${colaborador.nome} (${colaborador.cpfMascarado}) excluído (${entregasSnap.size} entregas, ${histSnap.size} históricos e ${itensSnap.size} vínculos em ações removidos).`
+    );
+
+    return {
+      deletedEntregas: entregasSnap.size,
+      deletedHistorico: histSnap.size,
+      deletedItens: itensSnap.size,
+    };
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
+  }
+}
+
+export async function excluirLoteColaboradores(
+  user: User,
+  colaboradores: Colaborador[]
+): Promise<{ sucesso: number; erros: Array<{ hash: string; motivo: string }> }> {
+  let sucesso = 0;
+  const erros: Array<{ hash: string; motivo: string }> = [];
+
+  for (const colab of colaboradores) {
+    try {
+      await excluirColaboradorCompleto(user, colab);
+      sucesso++;
+    } catch (error) {
+      erros.push({
+        hash: colab.cpfHash,
+        motivo: error instanceof Error ? error.message : 'Erro ao excluir cadastro.',
+      });
+    }
+  }
+
+  return { sucesso, erros };
+}
+

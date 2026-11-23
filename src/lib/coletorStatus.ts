@@ -78,27 +78,46 @@ export function formatDateTimeBR(isoDateTime?: string | null, fallbackDate?: str
 
 /**
  * Regra única e permanente do sistema:
- * Se o CPF possui pelo menos um registro de entrega -> JÁ RECEBEU.
- * Caso contrário -> NÃO RECEBEU.
+ * Se o CPF possui coletor ativo entregue (ou registro legado sem campo de posse) -> JÁ RECEBEU.
+ * Ao marcar devolução, possuiColetorAtivo torna-se false e volta para NÃO RECEBEU mantendo o histórico.
  * Sem prazos, bloqueios ou vencimentos.
  */
 export function evaluateRecebimentoStatus(
   colaborador:
-    | Pick<Colaborador, 'totalColetoresRecebidos' | 'ultimaEntregaData' | 'ultimaEntregaDataHora'>
+    | Pick<
+        Colaborador,
+        | 'totalColetoresRecebidos'
+        | 'ultimaEntregaData'
+        | 'ultimaEntregaDataHora'
+        | 'possuiColetorAtivo'
+        | 'ultimaDevolucaoData'
+        | 'ultimaDevolucaoDataHora'
+        | 'totalColetoresDevolvidos'
+      >
     | null
     | undefined
 ): ColaboradorStatusInfo {
   const total = colaborador?.totalColetoresRecebidos || 0;
-  const hasDelivery = Boolean(colaborador && (total > 0 || colaborador.ultimaEntregaData));
+  const totalDevolucoes = colaborador?.totalColetoresDevolvidos || 0;
+  const hasHistoricalDelivery = Boolean(colaborador && (total > 0 || colaborador.ultimaEntregaData));
+  const totalEntregas = hasHistoricalDelivery ? Math.max(1, total) : 0;
 
-  if (hasDelivery) {
+  const isActivePossession =
+    colaborador && colaborador.possuiColetorAtivo !== undefined
+      ? colaborador.possuiColetorAtivo
+      : hasHistoricalDelivery;
+
+  if (isActivePossession) {
     return {
       status: 'JA_RECEBEU',
       label: 'JÁ RECEBEU',
       jaRecebeu: true,
-      totalEntregas: Math.max(1, total),
+      totalEntregas,
       ultimaEntregaData: colaborador?.ultimaEntregaData || null,
       ultimaEntregaDataHora: colaborador?.ultimaEntregaDataHora || null,
+      totalDevolucoes,
+      ultimaDevolucaoData: colaborador?.ultimaDevolucaoData || null,
+      ultimaDevolucaoDataHora: colaborador?.ultimaDevolucaoDataHora || null,
     };
   }
 
@@ -106,8 +125,11 @@ export function evaluateRecebimentoStatus(
     status: 'NAO_RECEBEU',
     label: 'NÃO RECEBEU',
     jaRecebeu: false,
-    totalEntregas: 0,
-    ultimaEntregaData: null,
-    ultimaEntregaDataHora: null,
+    totalEntregas,
+    ultimaEntregaData: colaborador?.ultimaEntregaData || null,
+    ultimaEntregaDataHora: colaborador?.ultimaEntregaDataHora || null,
+    totalDevolucoes,
+    ultimaDevolucaoData: colaborador?.ultimaDevolucaoData || null,
+    ultimaDevolucaoDataHora: colaborador?.ultimaDevolucaoDataHora || null,
   };
 }

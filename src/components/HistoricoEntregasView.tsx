@@ -1,5 +1,15 @@
 import { useEffect, useMemo, useState } from 'react';
-import { History, RotateCcw, Search, UserSearch } from 'lucide-react';
+import type { User } from 'firebase/auth';
+import {
+  AlertTriangle,
+  CheckCircle2,
+  History,
+  RotateCcw,
+  Search,
+  Trash2,
+  UserSearch,
+  X,
+} from 'lucide-react';
 import { hashCpf, isValidCpf, normalizeCpf, normalizeName } from '../lib/cpf';
 import {
   formatDateTimeBR,
@@ -7,23 +17,33 @@ import {
   getCentroCusto,
   MESES_PT_BR,
 } from '../lib/coletorStatus';
+import {
+  excluirEntregaIndividual,
+  excluirTodoHistoricoEntregas,
+} from '../lib/firestoreService';
 import type { Acao, Colaborador, Empresa, Entrega, Unidade } from '../types/domain';
 
 interface HistoricoEntregasViewProps {
+  user: User;
   empresas: Empresa[];
   unidades: Unidade[];
   acoes: Acao[];
   colaboradores: Colaborador[];
   entregas: Entrega[];
+  canDeleteHistorico: boolean;
+  onRefresh: () => Promise<void>;
   onOpenColaborador: (colaborador: Colaborador) => void;
 }
 
 export function HistoricoEntregasView({
+  user,
   empresas,
   unidades,
   acoes,
   colaboradores,
   entregas,
+  canDeleteHistorico,
+  onRefresh,
   onOpenColaborador,
 }: HistoricoEntregasViewProps) {
   const [empresaId, setEmpresaId] = useState('TODAS');
@@ -41,6 +61,11 @@ export function HistoricoEntregasView({
     found: Colaborador | null;
     error?: string;
   }>({ checked: false, found: null });
+
+  const [pendingDeleteEntrega, setPendingDeleteEntrega] = useState<Entrega | null>(null);
+  const [confirmClearAllOpen, setConfirmClearAllOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [feedback, setFeedback] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
 
   useEffect(() => {
     const clean = normalizeCpf(searchQuery);
@@ -143,6 +168,50 @@ export function HistoricoEntregasView({
     }
   };
 
+  const handleDeleteSingle = async (entrega: Entrega) => {
+    if (!canDeleteHistorico) return;
+    setDeleting(true);
+    setFeedback(null);
+    try {
+      await excluirEntregaIndividual(user, entrega);
+      setPendingDeleteEntrega(null);
+      setFeedback({
+        type: 'ok',
+        text: `Registro de entrega de ${entrega.colaboradorNome} removido do histórico com sucesso.`,
+      });
+      await onRefresh();
+    } catch (err) {
+      setFeedback({
+        type: 'err',
+        text: err instanceof Error ? err.message : 'Erro ao excluir registro do histórico.',
+      });
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const handleClearAllHistory = async () => {
+    if (!canDeleteHistorico) return;
+    setDeleting(true);
+    setFeedback(null);
+    try {
+      const res = await excluirTodoHistoricoEntregas(user);
+      setConfirmClearAllOpen(false);
+      setFeedback({
+        type: 'ok',
+        text: `Histórico geral limpo com sucesso (${res.deletedEntregas} entregas removidas). Os cadastros dos colaboradores foram preservados como NÃO RECEBEU.`,
+      });
+      await onRefresh();
+    } catch (err) {
+      setFeedback({
+        type: 'err',
+        text: err instanceof Error ? err.message : 'Erro ao limpar o histórico de entregas.',
+      });
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div>
@@ -153,6 +222,23 @@ export function HistoricoEntregasView({
           Registro permanente de todas as entregas de coletores e consulta individual por CPF.
         </p>
       </div>
+
+      {feedback && (
+        <div
+          className={`p-3.5 rounded-xl border text-sm flex items-center gap-2.5 ${
+            feedback.type === 'ok'
+              ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+              : 'bg-rose-50 border-rose-200 text-rose-800'
+          }`}
+        >
+          {feedback.type === 'ok' ? (
+            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+          ) : (
+            <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+          )}
+          <span>{feedback.text}</span>
+        </div>
+      )}
 
       {/* Consulta Rápida por CPF */}
       <form
@@ -316,11 +402,23 @@ export function HistoricoEntregasView({
 
       {/* Tabela de Entregas */}
       <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
-        <div className="px-5 py-4 border-b border-slate-200 flex items-center justify-between">
+        <div className="px-5 py-4 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3">
           <h2 className="text-sm font-semibold text-slate-900 flex items-center gap-2">
             <History className="w-4 h-4 text-teal-600" />
             Entregas Registradas ({filteredEntregas.length})
           </h2>
+
+          {canDeleteHistorico && entregas.length > 0 && (
+            <button
+              type="button"
+              disabled={deleting}
+              onClick={() => setConfirmClearAllOpen(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-rose-700 bg-rose-50 border border-rose-200 hover:bg-rose-100 rounded-lg transition-colors whitespace-nowrap disabled:opacity-50"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              Limpar todo histórico
+            </button>
+          )}
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-left text-sm">
@@ -333,12 +431,16 @@ export function HistoricoEntregasView({
                 <th className="px-4 py-3">Empresa / Unidade</th>
                 <th className="px-4 py-3">Ação</th>
                 <th className="px-4 py-3">Responsável</th>
+                {canDeleteHistorico && <th className="px-4 py-3 text-right">Operação</th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {filteredEntregas.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-4 py-12 text-center text-sm text-slate-400">
+                  <td
+                    colSpan={canDeleteHistorico ? 8 : 7}
+                    className="px-4 py-12 text-center text-sm text-slate-400"
+                  >
                     Nenhuma entrega registrada até o momento.
                   </td>
                 </tr>
@@ -372,6 +474,20 @@ export function HistoricoEntregasView({
                       </td>
                       <td className="px-4 py-3 text-slate-800">{e.acaoNome}</td>
                       <td className="px-4 py-3 text-xs text-slate-600">{e.responsavelNome}</td>
+                      {canDeleteHistorico && (
+                        <td className="px-4 py-3 text-right whitespace-nowrap">
+                          <button
+                            type="button"
+                            disabled={deleting}
+                            onClick={() => setPendingDeleteEntrega(e)}
+                            title="Excluir registro individual do histórico"
+                            className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-rose-700 bg-white border border-rose-200 hover:bg-rose-50 rounded-lg transition-colors disabled:opacity-50"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                            Excluir
+                          </button>
+                        </td>
+                      )}
                     </tr>
                   );
                 })
@@ -380,6 +496,126 @@ export function HistoricoEntregasView({
           </table>
         </div>
       </div>
+
+      {/* Modal de Confirmação — Exclusão de Entrega Individual */}
+      {pendingDeleteEntrega && (
+        <div
+          className="fixed inset-0 z-50 bg-slate-900/50 flex items-center justify-center p-4"
+          role="dialog"
+          aria-modal="true"
+        >
+          <div className="bg-white border border-rose-200 rounded-xl max-w-md w-full p-6 space-y-4">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-start gap-2.5">
+                <Trash2 className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
+                <div>
+                  <h2 className="text-base font-bold text-slate-900">
+                    Excluir registro do histórico
+                  </h2>
+                  <p className="text-xs text-slate-600 mt-1">
+                    Este registro de entrega será excluído permanentemente e a situação do colaborador será recalculada com base nas entregas restantes.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPendingDeleteEntrega(null)}
+                className="p-1 text-slate-400 hover:text-slate-700 rounded-lg"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-3.5 rounded-lg bg-slate-50 border border-slate-200 text-xs space-y-1">
+              <div className="font-semibold text-slate-900">
+                {pendingDeleteEntrega.colaboradorNome}
+              </div>
+              <div className="font-mono-tabular text-slate-600">
+                CPF: {pendingDeleteEntrega.cpfMascarado}
+              </div>
+              <div className="font-mono-tabular text-slate-600">
+                Entrega:{' '}
+                {formatDateTimeBR(
+                  pendingDeleteEntrega.dataHoraEntrega,
+                  pendingDeleteEntrega.dataEntrega
+                )}{' '}
+                · {pendingDeleteEntrega.acaoNome}
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2.5 pt-2">
+              <button
+                type="button"
+                disabled={deleting}
+                onClick={() => setPendingDeleteEntrega(null)}
+                className="px-4 py-2 text-xs font-medium text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 rounded-lg"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={deleting}
+                onClick={() => handleDeleteSingle(pendingDeleteEntrega)}
+                className="px-4 py-2 text-xs font-semibold text-white bg-rose-600 hover:bg-rose-700 rounded-lg disabled:opacity-50"
+              >
+                {deleting ? 'Excluindo...' : 'Excluir registro'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Confirmação — Limpar Todo Histórico Geral */}
+      {confirmClearAllOpen && (
+        <div
+          className="fixed inset-0 z-50 bg-slate-900/50 flex items-center justify-center p-4"
+          role="dialog"
+          aria-modal="true"
+        >
+          <div className="bg-white border border-rose-200 rounded-xl max-w-md w-full p-6 space-y-4">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-start gap-2.5">
+                <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
+                <div>
+                  <h2 className="text-base font-bold text-slate-900">
+                    Limpar todo o histórico de entregas
+                  </h2>
+                  <p className="text-xs text-slate-600 mt-1">
+                    Todos os <strong>{entregas.length}</strong> registros de entrega serão excluídos permanentemente. Os cadastros dos colaboradores permanecerão na base com situação <strong>NÃO RECEBEU</strong>.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setConfirmClearAllOpen(false)}
+                className="p-1 text-slate-400 hover:text-slate-700 rounded-lg"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="flex items-center justify-end gap-2.5 pt-2">
+              <button
+                type="button"
+                disabled={deleting}
+                onClick={() => setConfirmClearAllOpen(false)}
+                className="px-4 py-2 text-xs font-medium text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 rounded-lg"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={deleting}
+                onClick={handleClearAllHistory}
+                className="px-4 py-2 text-xs font-semibold text-white bg-rose-600 hover:bg-rose-700 rounded-lg disabled:opacity-50"
+              >
+                {deleting ? 'Limpando...' : 'Excluir todo o histórico'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
+
